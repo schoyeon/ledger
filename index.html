@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>등록금 장부</title>
+<meta name="description" content="석박통합 10학기 등록금 납부와 지도교수 지원금을 한 장부에서 맞춰 보는 개인용 계산기">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f5f8; --surface: #ffffff; --line: #e3e6ec; --line-2: #cfd4dd;
+    --ink: #171a20; --ink-2: #565d6b; --ink-3: #8b929f;
+    --accent: #1f5fbf; --accent-soft: #e6eefb;
+    --plus: #1a8f5c; --plus-soft: #e3f4ec; --minus: #c8413f; --minus-soft: #fbe8e7; --warn-soft: #fff4d6; --warn: #9a6b00;
+    --font: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', -apple-system, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0f1115; --surface: #171a20; --line: #262b34; --line-2: #343a46;
+      --ink: #eef0f3; --ink-2: #a6adb9; --ink-3: #737b88;
+      --accent: #6b93ea; --accent-soft: #1c2740;
+      --plus: #3fc07e; --plus-soft: #143324; --minus: #ef6b69; --minus-soft: #3c1e1d; --warn-soft: #3a2f10; --warn: #e2b04a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f1115; --surface: #171a20; --line: #262b34; --line-2: #343a46;
+    --ink: #eef0f3; --ink-2: #a6adb9; --ink-3: #737b88;
+    --accent: #6b93ea; --accent-soft: #1c2740;
+    --plus: #3fc07e; --plus-soft: #143324; --minus: #ef6b69; --minus-soft: #3c1e1d; --warn-soft: #3a2f10; --warn: #e2b04a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { height: 100%; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.45; min-height: 100%; padding-block: 0 env(safe-area-inset-bottom, 0px); }
+  button, input, select { font: inherit; color: inherit; }
+  button { background: none; border: 0; cursor: pointer; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .wrap { max-width: 680px; margin: 0 auto; padding: 0 16px 64px; }
+  header { padding: 22px 0 14px; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+  header h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+  header .sub { font-size: 12.5px; color: var(--ink-3); margin-top: 3px; }
+  .tools { display: flex; gap: 6px; }
+  .tools button, .btn { font-size: 12.5px; font-weight: 600; color: var(--ink-2); padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger { color: var(--minus); }
+
+  /* 요약 타일 */
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .tile .label { font-size: 11.5px; color: var(--ink-3); }
+  .tile .val { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; margin-top: 4px; }
+  .tile .val small { font-size: 12px; font-weight: 600; color: var(--ink-3); margin-left: 2px; }
+  .tile .hint { font-size: 11.5px; color: var(--ink-2); margin-top: 4px; }
+  .tile.plus .val { color: var(--plus); } .tile.minus .val { color: var(--minus); }
+  .tile.hero { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .tile.hero .val { font-size: 28px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .badge.plus { background: var(--plus-soft); color: var(--plus); } .badge.minus { background: var(--minus-soft); color: var(--minus); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); } .badge.muted { background: var(--line); color: var(--ink-2); }
+
+  /* 진행 막대 */
+  .progress { margin-top: 10px; }
+  .progress .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; display: flex; }
+  .progress .bar i { display: block; height: 100%; }
+  .progress .bar .paid { background: var(--accent); }
+  .progress .legend { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-2); margin-top: 6px; }
+
+  /* 탭 */
+  .tabs { display: flex; gap: 2px; margin-top: 18px; border-bottom: 1px solid var(--line); }
+  .tabs button { padding: 10px 12px 11px; font-size: 13.5px; font-weight: 600; color: var(--ink-3); border-bottom: 2px solid transparent; margin-bottom: -1px; border-radius: 0; }
+  .tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .panel { display: none; padding-top: 16px; } .panel.active { display: block; }
+  .sec { font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); margin: 8px 0 8px; display: flex; justify-content: space-between; align-items: center; }
+  .sec .btn { text-transform: none; letter-spacing: 0; }
+
+  /* 표/행 */
+  .list { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .row { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px 12px; align-items: center; padding: 11px 14px; border-top: 1px solid var(--line); cursor: pointer; }
+  .row:first-child { border-top: 0; }
+  .row:hover { background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface)); }
+  .row .k { font-size: 13px; font-weight: 700; }
+  .row .k .s { display: block; font-size: 11.5px; color: var(--ink-3); font-weight: 500; }
+  .row .m { font-size: 13px; color: var(--ink-2); min-width: 0; }
+  .row .m b { color: var(--ink); font-weight: 600; }
+  .row .m .memo { display: block; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .v { text-align: right; font-weight: 700; font-size: 14px; }
+  .row .v small { display: block; font-size: 11px; color: var(--ink-3); font-weight: 500; }
+  .row.dim { opacity: 0.55; }
+  .empty { padding: 20px 14px; font-size: 13px; color: var(--ink-3); }
+  .note { font-size: 12px; color: var(--ink-3); line-height: 1.5; margin-top: 10px; }
+
+  /* 그래프 */
+  .chart { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px 8px; margin-bottom: 14px; }
+  .chart h3 { font-size: 13px; font-weight: 700; }
+  .chart .cap { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .chart svg { width: 100%; height: auto; display: block; margin-top: 8px; }
+  .chart .tip { font-size: 12px; color: var(--ink-2); min-height: 18px; margin-top: 4px; }
+
+  /* 시트(입력) */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
+  .sheet { width: 100%; max-width: 680px; background: var(--surface); border-radius: 16px 16px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); max-height: 92vh; overflow: auto; }
+  .sheet h2 { font-size: 16px; font-weight: 800; margin-bottom: 12px; }
+  .field { display: grid; gap: 4px; margin-bottom: 10px; }
+  .field label { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+  .field input, .field select { width: 100%; padding: 10px 11px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); font-size: 15px; }
+  .field .calc { font-size: 12px; color: var(--ink-3); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chips button { font-size: 12px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--ink-2); }
+  .chips button.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 700; }
+  .sheet-btns { display: flex; gap: 8px; margin-top: 14px; }
+  .sheet-btns .btn { flex: 1; text-align: center; padding: 11px; font-size: 14px; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 999px; font-size: 13px; opacity: 0; transition: .2s; pointer-events: none; z-index: 60; }
+  .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+  @media (max-width: 380px) { .tile .val { font-size: 19px; } .tile.hero .val { font-size: 24px; } .row { grid-template-columns: 56px 1fr auto; padding: 11px 12px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>등록금 장부</h1>
+      <div class="sub" id="subLine">석박통합 · 1-1 → 5-2 · 10학기</div>
+    </div>
+    <div class="tools">
+      <button type="button" onclick="exportJSON()">백업</button>
+      <button type="button" onclick="document.getElementById('importFile').click()">복원</button>
+      <input type="file" id="importFile" accept="application/json" hidden onchange="importJSON(this.files[0])">
+    </div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="summary" type="button">요약</button>
+    <button class="tab-btn" data-tab="terms" type="button">학기</button>
+    <button class="tab-btn" data-tab="support" type="button">지원금</button>
+    <button class="tab-btn" data-tab="moves" type="button">쓴 돈</button>
+    <button class="tab-btn" data-tab="settings" type="button">설정</button>
+  </nav>
+
+  <section class="panel active" id="panel-summary">
+    <div class="chart">
+      <h3>등록금 돈 흐름</h3>
+      <div class="cap"><span style="display:inline-block;width:10px;height:3px;background:var(--accent);vertical-align:middle;margin-right:4px"></span>있어야 할 돈(지원 − 납부) &nbsp; <span style="display:inline-block;width:10px;height:3px;background:var(--warn);vertical-align:middle;margin-right:4px"></span>실제 보관 중(꺼내 쓴 만큼 아래로)</div>
+      <div id="chart"></div>
+      <div class="tip" id="chartTip">점에 마우스를 올리거나 터치하면 그 시점 잔액이 보여요</div>
+    </div>
+    <div class="sec">다음 납부</div>
+    <div class="list" id="nextList"></div>
+    <p class="note" id="summaryNote"></p>
+  </section>
+
+  <section class="panel" id="panel-terms">
+    <div class="sec"><span>학기별 등록금</span><button class="btn" type="button" onclick="regenTerms(false)">학기 다시 생성</button></div>
+    <div class="list" id="termList"></div>
+    <p class="note">학기를 누르면 등록금·납부 내역을 고칠 수 있어요. 휴학 학기는 계산에서 빠집니다.</p>
+  </section>
+
+  <section class="panel" id="panel-support">
+    <div class="sec"><span>지원금 입금 기록</span><button class="btn primary" type="button" onclick="openSupport()">+ 입금 추가</button></div>
+    <div class="list" id="supportList"></div>
+    <p class="note">월급과 섞여 들어온 날은 <b>입금 총액</b>과 <b>그중 월급</b>을 적으면 나머지가 등록금 지원분으로 잡혀요. 지원분만 따로 들어왔으면 총액만 적으면 됩니다.</p>
+  </section>
+
+  <section class="panel" id="panel-moves">
+    <div class="sec"><span>등록금 돈 꺼내 씀 · 채워 넣음</span><button class="btn primary" type="button" onclick="openMove()">+ 기록</button></div>
+    <div class="list" id="moveList"></div>
+    <p class="note">미리 받아둔 등록금에서 생활비로 쓴 만큼 <b>꺼내 씀</b>, 나중에 통장에 다시 넣은 만큼 <b>채워 넣음</b>으로 적어요. 둘의 차이가 요약의 “채워 넣어야 할 돈”이에요.</p>
+  </section>
+
+  <section class="panel" id="panel-settings">
+    <div class="list" style="padding:14px">
+      <div class="grid2">
+        <div class="field"><label>1-1 학기 (과정 시작)</label><select id="setStart"></select><div class="calc">1학기 = 3~8월, 2학기 = 9~2월</div></div>
+        <div class="field"><label>총 학기 수</label><input id="setCount" type="number" min="1" max="20" inputmode="numeric"></div>
+      </div>
+      <div class="field"><label>기본 등록금 (학기당, 원)</label><input id="setTuition" type="text" inputmode="numeric" placeholder="예: 5,900,000"><div class="calc">학기별로 다르면 학기 탭에서 개별 수정</div></div>
+      <div class="field"><label>이름·메모 (선택)</label><input id="setName" type="text" placeholder="예: 고려대 ○○학과 석박통합"></div>
+      <div class="sheet-btns" style="margin-top:6px">
+        <button class="btn primary" type="button" onclick="saveSettings()">저장</button>
+        <button class="btn danger" type="button" onclick="resetAll()">전체 초기화</button>
+      </div>
+    </div>
+    <p class="note">데이터는 이 기기 브라우저에만 저장돼요. 다른 기기로 옮기려면 상단 <b>백업</b>으로 파일을 받아 <b>복원</b>하세요. 브라우저 데이터를 지우면 함께 사라지니 가끔 백업해 두세요.</p>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+<div id="sheetRoot"></div>
+
+<script>
+// ───────────── 저장/상태 ─────────────
+const KEY = 'tuition1';
+const defaultState = () => ({
+  settings: { startYear: 2026, startSem: 1, count: 10, tuition: 0, name: '석박통합' },
+  terms: [],      // {id, year, sem, tuition, paid, paidDate, leave, memo}
+  support: [],    // {id, date, total, salary, memo}  → 지원분 = total - salary
+  moves: [],      // {id, date, kind:'use'|'refill', amount, memo}  등록금 돈을 꺼내 씀 / 다시 채움
+});
+let S = load();
+function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.settings) { v.moves ??= []; return v; } } catch {} return defaultState(); }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('저장 실패: 브라우저 저장공간을 확인하세요'); } }
+
+// ───────────── 유틸 ─────────────
+const won = (n) => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('ko-KR') + '원';
+const manwon = (n) => { const m = Math.round(n / 10000); return (m).toLocaleString('ko-KR') + '만'; };
+const parseWon = (s) => Number(String(s ?? '').replace(/[^\d.-]/g, '')) || 0;
+const fmtInput = (el) => { const v = parseWon(el.value); el.value = v ? v.toLocaleString('ko-KR') : ''; };
+const termLabel = (t) => `${t.year}-${t.sem}`;                       // 달력 기준 (2026-2)
+const progLabel = (i) => `${Math.floor(i / 2) + 1}-${(i % 2) + 1}`;   // 과정 기준 (1-2 … 5-2)
+const semRange = (sem) => sem === 1 ? '3월~8월' : '9월~2월';
+// 지금이 어느 달력 학기인지: 3~8월 = 그 해 1학기, 9~2월 = 2학기 (1·2월은 전년도 2학기)
+const currentCal = () => { const { y, m } = kstParts(); return m >= 3 && m <= 8 ? { year: y, sem: 1 } : { year: m >= 9 ? y : y - 1, sem: 2 }; };
+const isCurrent = (t) => { const c = currentCal(); return t.year === c.year && t.sem === c.sem; };
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// 날짜는 항상 한국 시간(Asia/Seoul) 기준 — 기기 시간대가 달라도 학기 판정이 흔들리지 않게
+const kstParts = () => { const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).reduce((a, x) => ((a[x.type] = x.value), a), {}); return { y: Number(p.year), m: Number(p.month), d: Number(p.day), iso: `${p.year}-${p.month}-${p.day}` }; };
+const today = () => kstParts().iso;
+const uid = () => Date.now() + Math.random().toString(16).slice(2, 6);
+// 학기의 '납부 시점' 기준일: 1학기는 그 해 2월 말, 2학기는 8월 말
+const termDueDate = (t) => `${t.year}-${t.sem === 1 ? '02-25' : '08-25'}`;
+const termStatus = (t) => t.leave ? 'leave' : (t.paid > 0 ? (t.paid >= t.tuition ? 'paid' : 'partial') : (termDueDate(t) < today() ? 'overdue' : 'upcoming'));
+function toast(m) { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 2200); }
+
+// ───────────── 계산 ─────────────
+function calc() {
+  const active = S.terms.filter((t) => !t.leave);
+  const totalTuition = active.reduce((a, t) => a + (t.tuition || 0), 0);
+  const paid = active.reduce((a, t) => a + (t.paid || 0), 0);
+  const paidTerms = active.filter((t) => t.paid > 0).length;
+  const remaining = totalTuition - paid;
+  const remainingTerms = active.filter((t) => t.paid <= 0 || t.paid < t.tuition).length;
+  const supportTotal = S.support.reduce((a, s) => a + Math.max(0, (s.total || 0) - (s.salary || 0)), 0);
+  const balance = supportTotal - paid;                                  // 있어야 할 돈
+  const used = S.moves.filter((m) => m.kind === 'use').reduce((a, m) => a + (m.amount || 0), 0);
+  const refilled = S.moves.filter((m) => m.kind === 'refill').reduce((a, m) => a + (m.amount || 0), 0);
+  const netUsed = used - refilled;                                      // 채워 넣어야 할 돈
+  const actual = balance - netUsed;                                     // 실제 보관 중
+  const next = active.filter((t) => termStatus(t) === 'upcoming' || termStatus(t) === 'overdue' || termStatus(t) === 'partial')
+    .sort((a, b) => termDueDate(a).localeCompare(termDueDate(b)))[0] || null;
+  return { totalTuition, paid, paidTerms, remaining, remainingTerms, supportTotal, balance, used, refilled, netUsed, actual, next, activeTerms: active.length };
+}
+
+// 시간순 이벤트 → 누적 잔액 (그래프용)
+function timeline() {
+  const ev = [];
+  for (const s of S.support) ev.push({ date: s.date, delta: Math.max(0, (s.total || 0) - (s.salary || 0)), label: `지원 +${manwon(Math.max(0, (s.total || 0) - (s.salary || 0)))}`, kind: 'support' });
+  for (const t of S.terms) if (!t.leave && t.paid > 0) ev.push({ date: t.paidDate || termDueDate(t), delta: -t.paid, label: `${progLabel(S.terms.indexOf(t))} 납부 −${manwon(t.paid)}`, kind: 'pay' });
+  for (const m of S.moves) ev.push({ date: m.date, delta: 0, move: m.kind === 'use' ? -(m.amount || 0) : (m.amount || 0), label: `${m.kind === 'use' ? '꺼내 씀 −' : '채워 넣음 +'}${manwon(m.amount || 0)}`, kind: m.kind });
+  ev.sort((a, b) => a.date.localeCompare(b.date));
+  let bal = 0, act = 0;
+  return ev.map((e) => { bal += e.delta; act += e.delta + (e.move || 0); return { ...e, bal, act }; });
+}
+
+// ───────────── 렌더 ─────────────
+function render() {
+  const c = calc();
+  const curIdx = S.terms.findIndex(isCurrent);
+  document.getElementById('subLine').textContent = `${S.settings.name || '석박통합'} · ${curIdx >= 0 ? `현재 ${progLabel(curIdx)} · ` : ''}${S.terms.length ? progLabel(S.terms.length - 1) + '까지 ' : ''}${S.settings.count}학기 · 학기당 ${S.settings.tuition ? manwon(S.settings.tuition) + '원' : '등록금 미설정'}`;
+
+  const actCls = c.actual > 0 ? 'plus' : c.actual < 0 ? 'minus' : '';
+  const actHint = c.netUsed > 0
+    ? `있어야 할 돈 ${won(c.balance)} 중 <b>${won(c.netUsed)}</b>을 꺼내 썼어요 → 다음 납부 전에 채워 넣을 돈`
+    : c.balance > 0 ? '미리 받아둔 등록금이 그대로 있어요' : c.balance < 0 ? '내 돈으로 낸 부분 — 아직 지원받지 못한 금액' : '받은 지원과 낸 등록금이 딱 맞아요';
+  document.getElementById('tiles').innerHTML = `
+    <div class="tile hero ${actCls}">
+      <div><div class="label">실제 보관 중인 등록금 돈</div><div class="val num">${c.actual > 0 ? '+' : ''}${won(c.actual)}</div><div class="hint">${actHint}</div></div>
+      <span class="badge ${c.netUsed > 0 ? 'warn' : (actCls || 'muted')}">${c.netUsed > 0 ? '채워야 함' : c.actual > 0 ? '보관 중' : c.actual < 0 ? '미지원' : '정산'}</span>
+    </div>
+    <div class="tile ${c.netUsed > 0 ? 'minus' : ''}"><div class="label">채워 넣어야 할 돈</div><div class="val num">${won(Math.max(0, c.netUsed))}</div><div class="hint">꺼내 씀 ${won(c.used)} − 채움 ${won(c.refilled)}</div></div>
+    <div class="tile"><div class="label">있어야 할 돈 (지원 − 납부)</div><div class="val num">${c.balance > 0 ? '+' : ''}${won(c.balance)}</div><div class="hint">${c.balance > 0 ? '미리 받아둔 등록금' : c.balance < 0 ? '아직 지원 못 받은 부분' : '정산됨'}</div></div>
+    <div class="tile"><div class="label">지금까지 낸 등록금</div><div class="val num">${won(c.paid)}</div><div class="hint">${c.paidTerms}학기 납부</div></div>
+    <div class="tile"><div class="label">받은 등록금 지원 누계</div><div class="val num">${won(c.supportTotal)}</div><div class="hint">${S.support.length}건 입금</div></div>
+    <div class="tile"><div class="label">남은 등록금</div><div class="val num">${won(c.remaining)}</div><div class="hint">${c.remainingTerms}학기 남음</div></div>
+    <div class="tile"><div class="label">총 등록금 (전체 과정)</div><div class="val num">${won(c.totalTuition)}</div>
+      <div class="progress"><div class="bar"><i class="paid" style="width:${c.totalTuition ? Math.min(100, c.paid / c.totalTuition * 100) : 0}%"></i></div>
+      <div class="legend"><span>납부 ${c.totalTuition ? Math.round(c.paid / c.totalTuition * 100) : 0}%</span><span>${c.paidTerms}/${c.activeTerms}학기</span></div></div></div>`;
+
+  renderChart();
+  const nl = document.getElementById('nextList');
+  if (!S.terms.length) nl.innerHTML = '<div class="empty">설정 탭에서 시작 학기와 등록금을 넣으면 학기가 생성돼요.</div>';
+  else if (!c.next) nl.innerHTML = '<div class="empty">모든 학기 납부 완료. 수고했어요.</div>';
+  else {
+    const t = c.next, need = Math.max(0, (t.tuition || 0) - (t.paid || 0)), short = need - Math.max(0, c.actual);
+    nl.innerHTML = `<div class="row" onclick="openTerm('${t.id}')">
+      <div class="k">${progLabel(S.terms.indexOf(t))}<span class="s">${t.year}년 ${t.sem}학기 · ${termDueDate(t).slice(5).replace('-', '/')}경</span></div>
+      <div class="m">낼 금액 <b class="num">${won(need)}</b><span class="memo">${short > 0 ? `보관 중 ${won(Math.max(0, c.actual))} 충당 → 부족 ${won(short)}${c.netUsed > 0 ? ` (꺼내 쓴 ${won(c.netUsed)} 포함)` : ''}` : `보관 중인 돈으로 충당 가능 (남는 돈 ${won(-short)})`}</span></div>
+      <div class="v"><span class="badge ${short > 0 ? 'warn' : 'plus'}">${short > 0 ? '부족' : '충당 가능'}</span></div></div>`;
+  }
+  document.getElementById('summaryNote').textContent = S.terms.length
+    ? `등록금 돈을 생활비 등으로 썼으면 “쓴 돈” 탭에 기록하세요. 채워 넣을 때도 기록하면 “채워 넣어야 할 돈”이 0으로 돌아옵니다.` : '';
+
+  // 학기
+  const tl = document.getElementById('termList');
+  tl.innerHTML = S.terms.length ? S.terms.map((t, i) => {
+    const st = termStatus(t);
+    const badge = { paid: ['plus', '납부'], partial: ['warn', '일부'], overdue: ['minus', '미납'], upcoming: ['muted', '예정'], leave: ['muted', '휴학'] }[st];
+    return `<div class="row ${st === 'leave' ? 'dim' : ''}" onclick="openTerm('${t.id}')">
+      <div class="k">${progLabel(i)}<span class="s">${t.year}년 ${t.sem}학기</span></div>
+      <div class="m">등록금 <b class="num">${won(t.tuition)}</b><span class="memo">${t.paid > 0 ? `${t.paidDate || ''} 납부 ${won(t.paid)}` : `${semRange(t.sem)}${t.memo ? ' · ' + esc(t.memo) : ''}`}</span></div>
+      <div class="v">${isCurrent(t) ? '<span class="badge" style="background:var(--accent-soft);color:var(--accent);margin-right:4px">현재</span>' : ''}<span class="badge ${badge[0]}">${badge[1]}</span></div></div>`;
+  }).join('') : '<div class="empty">설정 탭에서 시작 학기·등록금을 저장하면 학기가 생성돼요.</div>';
+
+  // 지원금
+  const sl = document.getElementById('supportList');
+  const sorted = S.support.slice().sort((a, b) => b.date.localeCompare(a.date));
+  sl.innerHTML = sorted.length ? sorted.map((s) => {
+    const sup = Math.max(0, (s.total || 0) - (s.salary || 0));
+    return `<div class="row" onclick="openSupport('${s.id}')">
+      <div class="k">${s.date.slice(2, 7).replace('-', '.')}<span class="s">${s.date.slice(8)}일</span></div>
+      <div class="m">${s.salary ? `입금 <b class="num">${won(s.total)}</b> − 월급 ${won(s.salary)}` : `지원 입금`}<span class="memo">${esc(s.memo || '')}</span></div>
+      <div class="v num">+${won(sup)}<small>지원분</small></div></div>`;
+  }).join('') : '<div class="empty">아직 입금 기록이 없어요. “+ 입금 추가”로 시작하세요.</div>';
+
+  // 쓴 돈
+  const ml = document.getElementById('moveList');
+  const msorted = S.moves.slice().sort((a, b) => b.date.localeCompare(a.date));
+  ml.innerHTML = msorted.length ? msorted.map((m) => `<div class="row" onclick="openMove('${m.id}')">
+      <div class="k">${m.date.slice(2, 7).replace('-', '.')}<span class="s">${m.date.slice(8)}일</span></div>
+      <div class="m"><b>${m.kind === 'use' ? '꺼내 씀' : '채워 넣음'}</b><span class="memo">${esc(m.memo || '')}</span></div>
+      <div class="v num" style="color:${m.kind === 'use' ? 'var(--minus)' : 'var(--plus)'}">${m.kind === 'use' ? '−' : '+'}${won(m.amount)}</div></div>`).join('')
+    : '<div class="empty">아직 기록이 없어요. 등록금 돈을 쓰거나 채워 넣으면 “+ 기록”으로 남기세요.</div>';
+
+  // 설정 폼 값
+  const sel = document.getElementById('setStart');
+  if (!sel.options.length) { const y = new Date().getFullYear(); for (let yy = y - 8; yy <= y + 1; yy++) for (const sm of [1, 2]) sel.add(new Option(`${yy}년 ${sm}학기`, `${yy}-${sm}`)); }
+  sel.value = `${S.settings.startYear}-${S.settings.startSem}`;
+  document.getElementById('setCount').value = S.settings.count;
+  document.getElementById('setTuition').value = S.settings.tuition ? S.settings.tuition.toLocaleString('ko-KR') : '';
+  document.getElementById('setName').value = S.settings.name || '';
+}
+
+function renderChart() {
+  const tl = timeline();
+  const box = document.getElementById('chart');
+  if (tl.length < 1) { box.innerHTML = '<div class="empty" style="padding:14px 0">입금·납부 기록이 쌓이면 그래프가 그려져요.</div>'; return; }
+  const W = 640, H = 200, padL = 46, padR = 12, padT = 12, padB = 26;
+  const ys = tl.flatMap((e) => [e.bal, e.act]);
+  const yMin = Math.min(0, ...ys), yMax = Math.max(0, ...ys), span = (yMax - yMin) || 1;
+  const X = (i) => padL + (tl.length === 1 ? (W - padL - padR) / 2 : i * (W - padL - padR) / (tl.length - 1));
+  const Y = (v) => padT + (yMax - v) / span * (H - padT - padB);
+  const y0 = Y(0);
+  const pts = tl.map((e, i) => [X(i), Y(e.bal)]);
+  const apts = tl.map((e, i) => [X(i), Y(e.act)]);
+  const path = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const apath = apts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const area = `M${pts[0][0].toFixed(1)} ${y0.toFixed(1)} ` + pts.map((p) => `L${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ') + ` L${pts[pts.length - 1][0].toFixed(1)} ${y0.toFixed(1)} Z`;
+  const ticks = [yMax, (yMax + yMin) / 2, yMin].filter((v, i, a) => a.indexOf(v) === i);
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="지원 잔액 흐름">
+    ${ticks.map((v) => `<line x1="${padL}" x2="${W - padR}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/>
+      <text x="${padL - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--ink-3)">${manwon(v)}</text>`).join('')}
+    <line x1="${padL}" x2="${W - padR}" y1="${y0.toFixed(1)}" y2="${y0.toFixed(1)}" stroke="var(--line-2)" stroke-width="1.5"/>
+    <path d="${area}" fill="var(--accent)" fill-opacity="0.12"/>
+    <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+    <path d="${apath}" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linejoin="round" stroke-dasharray="${tl.some((e) => e.act !== e.bal) ? '0' : '4 4'}"/>
+    ${apts.map((p, i) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="var(--warn)" stroke="var(--surface)" stroke-width="1.5" data-i="${i}"/>`).join('')}
+    ${pts.map((p, i) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${i === pts.length - 1 ? 5 : 3.5}" fill="${tl[i].bal < 0 ? 'var(--minus)' : 'var(--accent)'}" stroke="var(--surface)" stroke-width="2" data-i="${i}"/>
+      <rect x="${(p[0] - 14).toFixed(1)}" y="0" width="28" height="${H}" fill="transparent" data-i="${i}"/>`).join('')}
+    <text x="${padL}" y="${H - 8}" font-size="10" fill="var(--ink-3)">${tl[0].date}</text>
+    <text x="${W - padR}" y="${H - 8}" font-size="10" fill="var(--ink-3)" text-anchor="end">${tl[tl.length - 1].date}</text>
+  </svg>`;
+  const tip = document.getElementById('chartTip');
+  box.querySelectorAll('[data-i]').forEach((el) => {
+    const show = () => { const e = tl[Number(el.dataset.i)]; tip.textContent = `${e.date} · ${e.label} → 있어야 할 돈 ${won(e.bal)} · 실제 보관 ${won(e.act)}`; };
+    el.addEventListener('mouseenter', show); el.addEventListener('touchstart', show, { passive: true }); el.addEventListener('click', show);
+  });
+}
+
+// ───────────── 설정/학기 생성 ─────────────
+function saveSettings() {
+  const [y, sm] = document.getElementById('setStart').value.split('-').map(Number);
+  S.settings.startYear = y; S.settings.startSem = sm;
+  S.settings.count = Math.max(1, Math.min(20, Number(document.getElementById('setCount').value) || 10));
+  S.settings.tuition = parseWon(document.getElementById('setTuition').value);
+  S.settings.name = document.getElementById('setName').value.trim();
+  regenTerms(true);
+  save(); render(); toast('저장됐어요'); selectTab('terms');
+}
+// 학기 목록을 설정에 맞춰 만든다. 이미 입력한 납부 내역은 같은 학기(연도-학기)면 유지.
+function regenTerms(silent) {
+  const old = Object.fromEntries(S.terms.map((t) => [termLabel(t), t]));
+  const out = []; let y = S.settings.startYear, sm = S.settings.startSem;
+  for (let i = 0; i < S.settings.count; i++) {
+    const key = `${y}-${sm}`; const o = old[key];
+    out.push(o ? { ...o, tuition: o.tuitionCustom ? o.tuition : (S.settings.tuition || o.tuition) } : { id: uid(), year: y, sem: sm, tuition: S.settings.tuition, paid: 0, paidDate: '', leave: false, memo: '' });
+    if (sm === 1) sm = 2; else { sm = 1; y++; }
+  }
+  S.terms = out; save(); render();
+  if (!silent) toast('학기를 다시 생성했어요');
+}
+function resetAll() { if (!confirm('모든 데이터를 지웁니다. 백업은 받아두셨나요?')) return; S = defaultState(); save(); render(); toast('초기화했어요'); }
+
+// ───────────── 시트 ─────────────
+function sheet(html) { document.getElementById('sheetRoot').innerHTML = `<div class="overlay" onclick="if(event.target===this)closeSheet()"><div class="sheet">${html}</div></div>`; }
+function closeSheet() { document.getElementById('sheetRoot').innerHTML = ''; }
+
+function openTerm(id) {
+  const t = S.terms.find((x) => x.id === id); if (!t) return;
+  const c = calc();
+  sheet(`<h2>${progLabel(S.terms.indexOf(t))} 등록금 <span style="font-size:13px;color:var(--ink-3);font-weight:500">${t.year}년 ${t.sem}학기 · ${semRange(t.sem)}</span></h2>
+    <div class="grid2">
+      <div class="field"><label>등록금 (원)</label><input id="tTuition" type="text" inputmode="numeric" value="${t.tuition ? t.tuition.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this)"></div>
+      <div class="field"><label>휴학</label><select id="tLeave"><option value="0" ${!t.leave ? 'selected' : ''}>아니오</option><option value="1" ${t.leave ? 'selected' : ''}>휴학 (계산 제외)</option></select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>납부액 (원)</label><input id="tPaid" type="text" inputmode="numeric" value="${t.paid ? t.paid.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this)"><div class="calc">전액 납부면 등록금과 같게</div></div>
+      <div class="field"><label>납부일</label><input id="tDate" type="date" value="${t.paidDate || ''}"></div>
+    </div>
+    <div class="chips" style="margin:-4px 0 10px">
+      <button type="button" onclick="document.getElementById('tPaid').value=document.getElementById('tTuition').value;if(!document.getElementById('tDate').value)document.getElementById('tDate').value='${termDueDate(t)}'">전액 납부로 채우기</button>
+      <button type="button" onclick="document.getElementById('tPaid').value='';document.getElementById('tDate').value=''">납부 지우기</button>
+    </div>
+    <div class="field"><label>메모</label><input id="tMemo" type="text" value="${esc(t.memo || '')}" placeholder="예: 연구실 계좌에서 이체"></div>
+    <p class="note">현재 지원 잔액 ${c.balance >= 0 ? '+' : ''}${won(c.balance)}. 이 학기를 납부 처리하면 잔액에서 그만큼 빠져요.</p>
+    <div class="sheet-btns"><button class="btn" type="button" onclick="closeSheet()">취소</button><button class="btn primary" type="button" onclick="saveTerm('${t.id}')">저장</button></div>`);
+}
+function saveTerm(id) {
+  const t = S.terms.find((x) => x.id === id); if (!t) return;
+  const tu = parseWon(document.getElementById('tTuition').value);
+  t.tuitionCustom = tu !== S.settings.tuition; t.tuition = tu;
+  t.leave = document.getElementById('tLeave').value === '1';
+  t.paid = parseWon(document.getElementById('tPaid').value);
+  t.paidDate = document.getElementById('tDate').value || (t.paid ? today() : '');
+  t.memo = document.getElementById('tMemo').value.trim();
+  save(); render(); closeSheet(); toast('저장됐어요');
+}
+
+function openSupport(id) {
+  const s = id ? S.support.find((x) => x.id === id) : { id: '', date: today(), total: 0, salary: 0, memo: '' };
+  if (!s) return;
+  sheet(`<h2>${id ? '입금 수정' : '지원금 입금'}</h2>
+    <div class="field"><label>입금일</label><input id="sDate" type="date" value="${s.date}"></div>
+    <div class="grid2">
+      <div class="field"><label>입금 총액 (원)</label><input id="sTotal" type="text" inputmode="numeric" value="${s.total ? s.total.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this);calcSupport()" oninput="calcSupport()"></div>
+      <div class="field"><label>그중 월급 (원)</label><input id="sSalary" type="text" inputmode="numeric" value="${s.salary ? s.salary.toLocaleString('ko-KR') : ''}" placeholder="0" onblur="fmtInput(this);calcSupport()" oninput="calcSupport()"></div>
+    </div>
+    <div class="field"><label>등록금 지원분</label><div class="calc" id="sCalc" style="font-size:15px;font-weight:700;color:var(--plus)"></div></div>
+    <div class="field"><label>메모</label><input id="sMemo" type="text" value="${esc(s.memo || '')}" placeholder="예: 9월 월급과 함께, 2학기분 미리"></div>
+    <div class="sheet-btns">
+      ${id ? `<button class="btn danger" type="button" onclick="delSupport('${id}')">삭제</button>` : ''}
+      <button class="btn" type="button" onclick="closeSheet()">취소</button>
+      <button class="btn primary" type="button" onclick="saveSupport('${id}')">저장</button></div>`);
+  calcSupport();
+}
+function calcSupport() {
+  const t = parseWon(document.getElementById('sTotal').value), sal = parseWon(document.getElementById('sSalary').value);
+  document.getElementById('sCalc').textContent = t ? `+${won(Math.max(0, t - sal))}` + (sal > t ? ' (월급이 총액보다 커요)' : '') : '총액을 입력하세요';
+}
+function saveSupport(id) {
+  const rec = { id: id || uid(), date: document.getElementById('sDate').value || today(), total: parseWon(document.getElementById('sTotal').value), salary: parseWon(document.getElementById('sSalary').value), memo: document.getElementById('sMemo').value.trim() };
+  if (!rec.total) return toast('입금 총액을 입력하세요');
+  if (id) S.support = S.support.map((x) => x.id === id ? rec : x); else S.support.push(rec);
+  save(); render(); closeSheet(); toast(id ? '수정됐어요' : '추가됐어요');
+}
+function delSupport(id) { if (!confirm('이 입금 기록을 삭제할까요?')) return; S.support = S.support.filter((x) => x.id !== id); save(); render(); closeSheet(); toast('삭제했어요'); }
+
+function openMove(id) {
+  const m = id ? S.moves.find((x) => x.id === id) : { id: '', date: today(), kind: 'use', amount: 0, memo: '' };
+  if (!m) return;
+  const c = calc();
+  sheet(`<h2>${id ? '기록 수정' : '등록금 돈 기록'}</h2>
+    <div class="field"><label>종류</label><div class="chips">
+      <button type="button" id="mkUse" class="${m.kind === 'use' ? 'on' : ''}" onclick="setKind('use')">꺼내 씀 (생활비 등으로)</button>
+      <button type="button" id="mkRefill" class="${m.kind === 'refill' ? 'on' : ''}" onclick="setKind('refill')">채워 넣음</button></div></div>
+    <div class="grid2">
+      <div class="field"><label>날짜</label><input id="mDate" type="date" value="${m.date}"></div>
+      <div class="field"><label>금액 (원)</label><input id="mAmount" type="text" inputmode="numeric" value="${m.amount ? m.amount.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this)"></div>
+    </div>
+    <div class="field"><label>메모</label><input id="mMemo" type="text" value="${esc(m.memo || '')}" placeholder="예: 월세, 카드값 / 10월 월급에서 채움"></div>
+    <p class="note">지금 실제 보관 중 ${won(c.actual)} · 채워 넣어야 할 돈 ${won(Math.max(0, c.netUsed))}</p>
+    <div class="sheet-btns">
+      ${id ? `<button class="btn danger" type="button" onclick="delMove('${id}')">삭제</button>` : ''}
+      <button class="btn" type="button" onclick="closeSheet()">취소</button>
+      <button class="btn primary" type="button" onclick="saveMove('${id}')">저장</button></div>`);
+  window._moveKind = m.kind;
+}
+function setKind(k) { window._moveKind = k; document.getElementById('mkUse').classList.toggle('on', k === 'use'); document.getElementById('mkRefill').classList.toggle('on', k === 'refill'); }
+function saveMove(id) {
+  const rec = { id: id || uid(), date: document.getElementById('mDate').value || today(), kind: window._moveKind || 'use', amount: parseWon(document.getElementById('mAmount').value), memo: document.getElementById('mMemo').value.trim() };
+  if (!rec.amount) return toast('금액을 입력하세요');
+  if (id) S.moves = S.moves.map((x) => x.id === id ? rec : x); else S.moves.push(rec);
+  save(); render(); closeSheet(); toast(id ? '수정됐어요' : '기록했어요');
+}
+function delMove(id) { if (!confirm('이 기록을 삭제할까요?')) return; S.moves = S.moves.filter((x) => x.id !== id); save(); render(); closeSheet(); toast('삭제했어요'); }
+
+// ───────────── 백업/복원 ─────────────
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `등록금장부-${today()}.json`; a.click(); URL.revokeObjectURL(a.href);
+}
+function importJSON(file) {
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = () => { try { const v = JSON.parse(r.result); if (!v.settings || !Array.isArray(v.terms)) throw 0; v.moves ??= []; S = v; save(); render(); toast('복원했어요'); } catch { toast('파일 형식이 맞지 않아요'); } };
+  r.readAsText(file);
+}
+
+// ───────────── 탭 ─────────────
+function selectTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + name));
+}
+document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => selectTab(b.dataset.tab)));
+
+if (!S.terms.length) regenTerms(true);
+render();
+if (!S.settings.tuition) { selectTab('settings'); toast('학기당 등록금을 넣고 저장하세요'); }
+</script>
+</body>
+</html>
