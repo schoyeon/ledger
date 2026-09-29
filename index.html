@@ -47,6 +47,8 @@
   .tools button, .btn { font-size: 12.5px; font-weight: 600; color: var(--ink-2); padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.danger { color: var(--minus); }
+  .tools button.on { color: var(--plus); border-color: var(--plus-soft); background: var(--plus-soft); }
+  .tools button.err { color: var(--minus); }
 
   /* 요약 타일 */
   .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -127,6 +129,7 @@
       <div class="sub" id="subLine">석박통합 · 1-1 → 5-2 · 10학기</div>
     </div>
     <div class="tools">
+      <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
       <button type="button" onclick="exportJSON()">백업</button>
       <button type="button" onclick="document.getElementById('importFile').click()">복원</button>
       <input type="file" id="importFile" accept="application/json" hidden onchange="importJSON(this.files[0])">
@@ -204,7 +207,11 @@ const defaultState = () => ({
 });
 let S = load();
 function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.settings) { v.moves ??= []; return v; } } catch {} return defaultState(); }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('저장 실패: 브라우저 저장공간을 확인하세요'); } }
+function save() {
+  S.updatedAt = new Date().toISOString();
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('저장 실패: 브라우저 저장공간을 확인하세요'); }
+  cloudPush();   // 로그인돼 있으면 클라우드에도 (아니면 조용히 무시)
+}
 
 // ───────────── 유틸 ─────────────
 const won = (n) => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('ko-KR') + '원';
@@ -390,7 +397,10 @@ function regenTerms(silent) {
     out.push(o ? { ...o, tuition: o.tuitionCustom ? o.tuition : (S.settings.tuition || o.tuition) } : { id: uid(), year: y, sem: sm, tuition: S.settings.tuition, paid: 0, paidDate: '', leave: false, memo: '' });
     if (sm === 1) sm = 2; else { sm = 1; y++; }
   }
-  S.terms = out; save(); render();
+  S.terms = out;
+  if (silent) { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} }   // 부팅 자동 생성: updatedAt 안 건드림 (클라우드 우선)
+  else save();
+  render();
   if (!silent) toast('학기를 다시 생성했어요');
 }
 function resetAll() { if (!confirm('모든 데이터를 지웁니다. 백업은 받아두셨나요?')) return; S = defaultState(); save(); render(); toast('초기화했어요'); }
@@ -500,6 +510,107 @@ function importJSON(file) {
   r.readAsText(file);
 }
 
+// ───────────── 클라우드 동기화 (선택) ─────────────
+// 로그인하면 전체 장부를 Supabase `ledger` 테이블의 내 행 하나에 통째로 저장한다 (RLS: 본인 행만).
+// 로컬(localStorage)은 항상 유지 — 오프라인에서도 쓰고, 로그인하면 최신 저장(updatedAt)이 이긴다.
+const SB_URL = 'https://wblndotsbuejihjembjz.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndibG5kb3RzYnVlamloamVtYmp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5MTczODksImV4cCI6MjEwNTQ5MzM4OX0.BvPUSn3afCpe5LkhIcygwENtf6pNZPGfvRDLR2Q1eBQ';   // anon 공개 키 (데이터는 로그인 토큰 + RLS 로만 접근)
+const AUTH_KEY = 'ledger_auth';
+let session = (() => { try { return JSON.parse(localStorage.getItem(AUTH_KEY)); } catch { return null; } })();
+const saveSession = (x) => { session = x; try { x ? localStorage.setItem(AUTH_KEY, JSON.stringify(x)) : localStorage.removeItem(AUTH_KEY); } catch {} };
+async function authPost(path, body, token) {
+  const headers = { apikey: SB_KEY, 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const res = await fetch(`${SB_URL}/auth/v1/${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.msg || j.error_description || j.error || ('HTTP ' + res.status));
+  return j;
+}
+const packSession = (j) => ({ access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + ((j.expires_in || 3600) * 1000), email: j.user && j.user.email });
+async function getToken() {
+  if (!session) return null;
+  if (Date.now() > session.expires_at - 60000) {
+    try { saveSession(packSession(await authPost('token?grant_type=refresh_token', { refresh_token: session.refresh_token }))); }
+    catch { saveSession(null); setSyncUI('로그인 만료', 'err'); return null; }
+  }
+  return session.access_token;
+}
+function setSyncUI(text, cls) { const b = document.getElementById('syncBtn'); b.textContent = text; b.className = cls || ''; }
+
+let pushTimer = null, pushing = false;
+function cloudPush() {
+  if (!session) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(async () => {
+    const token = await getToken(); if (!token) return;
+    pushing = true; setSyncUI('저장 중…');
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/ledger?on_conflict=user_id`, {
+        method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ data: S, updated_at: S.updatedAt }),
+      });
+      if (res.status === 401) { saveSession(null); setSyncUI('로그인', ''); return; }
+      if (!res.ok) throw new Error(await res.text());
+      setSyncUI('☁ ' + new Date().toTimeString().slice(0, 5), 'on');
+    } catch (e) { console.error('cloudPush', e); setSyncUI('동기화 실패', 'err'); }
+    finally { pushing = false; }
+  }, 600);   // 연타 저장을 묶는다
+}
+async function cloudPull(reason) {
+  const token = await getToken(); if (!token) return;
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/ledger?select=data,updated_at&limit=1`, { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token } });
+    if (res.status === 401) { saveSession(null); setSyncUI('로그인', ''); return; }
+    if (!res.ok) throw new Error(await res.text());
+    const rows = await res.json();
+    if (!rows.length) { cloudPush(); setSyncUI('☁ 첫 동기화', 'on'); return; }            // 클라우드가 비어 있으면 로컬을 올린다
+    const cloud = rows[0];
+    const cloudAt = cloud.data?.updatedAt || cloud.updated_at || '', localAt = S.updatedAt || '';
+    const localEmpty = !S.support.length && !S.moves.length && !S.terms.some((t) => t.paid > 0) && !S.settings.tuition;
+    if (cloudAt > localAt || localEmpty) {
+      S = cloud.data; S.moves ??= [];
+      try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {}
+      render(); toast(reason === 'login' ? '클라우드 장부를 불러왔어요' : '다른 기기의 변경을 받았어요');
+    } else if (localAt > cloudAt) { cloudPush(); }
+    setSyncUI('☁ ' + new Date().toTimeString().slice(0, 5), 'on');
+  } catch (e) { console.error('cloudPull', e); setSyncUI('동기화 실패', 'err'); }
+}
+function onSyncBtn() {
+  if (!session) return openLogin();
+  sheet(`<h2>클라우드 동기화</h2>
+    <p class="note" style="margin:0 0 12px">${esc(session.email || '')} 로 로그인됨. 저장할 때마다 클라우드에 올라가고, 다른 기기에서 열면 최신 저장이 내려와요.</p>
+    <div class="sheet-btns">
+      <button class="btn danger" type="button" onclick="signOut()">로그아웃</button>
+      <button class="btn" type="button" onclick="closeSheet();cloudPull('manual')">지금 동기화</button>
+      <button class="btn primary" type="button" onclick="closeSheet()">닫기</button></div>`);
+}
+function openLogin() {
+  sheet(`<h2>로그인</h2>
+    <p class="note" style="margin:0 0 12px">발 통증 일기와 같은 계정이에요. 로그인하면 폰·맥이 같은 장부를 봐요. 로그인 없이도 이 기기에서는 계속 쓸 수 있어요.</p>
+    <form id="loginForm" onsubmit="return doLogin(event)">
+      <div class="field"><label>이메일</label><input id="lEmail" type="email" autocomplete="username" required></div>
+      <div class="field"><label>비밀번호</label><input id="lPw" type="password" autocomplete="current-password" required></div>
+      <div class="note" id="lErr" style="color:var(--minus);min-height:18px;margin:0"></div>
+      <div class="sheet-btns"><button class="btn" type="button" onclick="closeSheet()">취소</button><button class="btn primary" type="submit" id="lBtn">로그인</button></div>
+    </form>`);
+  setTimeout(() => document.getElementById('lEmail')?.focus(), 50);
+}
+async function doLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('lBtn'), err = document.getElementById('lErr');
+  btn.disabled = true; btn.textContent = '확인 중…'; err.textContent = '';
+  try {
+    saveSession(packSession(await authPost('token?grant_type=password', { email: document.getElementById('lEmail').value.trim(), password: document.getElementById('lPw').value })));
+    closeSheet(); await cloudPull('login');
+  } catch (ex) { err.textContent = /invalid|credentials/i.test(ex.message) ? '이메일 또는 비밀번호가 틀렸어요' : '로그인 실패: ' + ex.message; }
+  finally { btn.disabled = false; btn.textContent = '로그인'; }
+  return false;
+}
+async function signOut() {
+  try { if (session) await authPost('logout', {}, session.access_token); } catch {}
+  saveSession(null); closeSheet(); setSyncUI('로그인', ''); toast('로그아웃했어요 (이 기기 데이터는 유지)');
+}
+
 // ───────────── 탭 ─────────────
 function selectTab(name) {
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
@@ -509,7 +620,9 @@ document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click',
 
 if (!S.terms.length) regenTerms(true);
 render();
-if (!S.settings.tuition) { selectTab('settings'); toast('학기당 등록금을 넣고 저장하세요'); }
+if (session) { setSyncUI('☁ 확인 중', 'on'); cloudPull('boot'); }
+else if (!S.settings.tuition) { selectTab('settings'); toast('학기당 등록금을 넣고 저장하세요'); }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && session && !pushing) cloudPull('resume'); });
 </script>
 </body>
 </html>
