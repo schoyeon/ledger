@@ -204,9 +204,11 @@ const defaultState = () => ({
   terms: [],      // {id, year, sem, tuition, paid, paidDate, leave, memo}
   support: [],    // {id, date, total, salary, memo}  → 지원분 = total - salary
   moves: [],      // {id, date, kind:'use'|'refill', amount, memo}  등록금 돈을 꺼내 씀 / 다시 채움
+  deleted: {},    // {id: 삭제시각}  기기 간 합칠 때 되살아나지 않게
 });
 let S = load();
-function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.settings) { v.moves ??= []; return v; } } catch {} return defaultState(); }
+function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.settings) { v.moves ??= []; v.deleted ??= {}; return v; } } catch {} return defaultState(); }
+const stamp = (r) => ({ ...r, at: new Date().toISOString() });   // 기록 단위 수정 시각
 function save() {
   S.updatedAt = new Date().toISOString();
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('저장 실패: 브라우저 저장공간을 확인하세요'); }
@@ -385,6 +387,7 @@ function saveSettings() {
   S.settings.count = Math.max(1, Math.min(20, Number(document.getElementById('setCount').value) || 10));
   S.settings.tuition = parseWon(document.getElementById('setTuition').value);
   S.settings.name = document.getElementById('setName').value.trim();
+  S.settings.at = new Date().toISOString();
   regenTerms(true);
   save(); render(); toast('저장됐어요'); selectTab('terms');
 }
@@ -437,6 +440,7 @@ function saveTerm(id) {
   t.paid = parseWon(document.getElementById('tPaid').value);
   t.paidDate = document.getElementById('tDate').value || (t.paid ? today() : '');
   t.memo = document.getElementById('tMemo').value.trim();
+  t.at = new Date().toISOString();
   save(); render(); closeSheet(); toast('저장됐어요');
 }
 
@@ -464,10 +468,11 @@ function calcSupport() {
 function saveSupport(id) {
   const rec = { id: id || uid(), date: document.getElementById('sDate').value || today(), total: parseWon(document.getElementById('sTotal').value), salary: parseWon(document.getElementById('sSalary').value), memo: document.getElementById('sMemo').value.trim() };
   if (!rec.total) return toast('입금 총액을 입력하세요');
-  if (id) S.support = S.support.map((x) => x.id === id ? rec : x); else S.support.push(rec);
+  const r = stamp(rec);
+  if (id) S.support = S.support.map((x) => x.id === id ? r : x); else S.support.push(r);
   save(); render(); closeSheet(); toast(id ? '수정됐어요' : '추가됐어요');
 }
-function delSupport(id) { if (!confirm('이 입금 기록을 삭제할까요?')) return; S.support = S.support.filter((x) => x.id !== id); save(); render(); closeSheet(); toast('삭제했어요'); }
+function delSupport(id) { if (!confirm('이 입금 기록을 삭제할까요?')) return; S.support = S.support.filter((x) => x.id !== id); S.deleted[id] = new Date().toISOString(); save(); render(); closeSheet(); toast('삭제했어요'); }
 
 function openMove(id) {
   const m = id ? S.moves.find((x) => x.id === id) : { id: '', date: today(), kind: 'use', amount: 0, memo: '' };
@@ -493,10 +498,11 @@ function setKind(k) { window._moveKind = k; document.getElementById('mkUse').cla
 function saveMove(id) {
   const rec = { id: id || uid(), date: document.getElementById('mDate').value || today(), kind: window._moveKind || 'use', amount: parseWon(document.getElementById('mAmount').value), memo: document.getElementById('mMemo').value.trim() };
   if (!rec.amount) return toast('금액을 입력하세요');
-  if (id) S.moves = S.moves.map((x) => x.id === id ? rec : x); else S.moves.push(rec);
+  const r = stamp(rec);
+  if (id) S.moves = S.moves.map((x) => x.id === id ? r : x); else S.moves.push(r);
   save(); render(); closeSheet(); toast(id ? '수정됐어요' : '기록했어요');
 }
-function delMove(id) { if (!confirm('이 기록을 삭제할까요?')) return; S.moves = S.moves.filter((x) => x.id !== id); save(); render(); closeSheet(); toast('삭제했어요'); }
+function delMove(id) { if (!confirm('이 기록을 삭제할까요?')) return; S.moves = S.moves.filter((x) => x.id !== id); S.deleted[id] = new Date().toISOString(); save(); render(); closeSheet(); toast('삭제했어요'); }
 
 // ───────────── 백업/복원 ─────────────
 function exportJSON() {
@@ -506,7 +512,7 @@ function exportJSON() {
 function importJSON(file) {
   if (!file) return;
   const r = new FileReader();
-  r.onload = () => { try { const v = JSON.parse(r.result); if (!v.settings || !Array.isArray(v.terms)) throw 0; v.moves ??= []; S = v; save(); render(); toast('복원했어요'); } catch { toast('파일 형식이 맞지 않아요'); } };
+  r.onload = () => { try { const v = JSON.parse(r.result); if (!v.settings || !Array.isArray(v.terms)) throw 0; v.moves ??= []; v.deleted ??= {}; S = v; save(); render(); toast('복원했어요'); } catch { toast('파일 형식이 맞지 않아요'); } };
   r.readAsText(file);
 }
 
@@ -537,6 +543,30 @@ async function getToken() {
 }
 function setSyncUI(text, cls) { const b = document.getElementById('syncBtn'); b.textContent = text; b.className = cls || ''; }
 
+// ---- 기록 단위 합치기: 같은 id 는 더 최근(at) 것, 한쪽에만 있으면 유지, 삭제 표식이 더 최근이면 삭제 ----
+const syncLog = [];
+const logSync = (m) => { syncLog.unshift(new Date().toTimeString().slice(0, 8) + ' ' + m); syncLog.length = Math.min(syncLog.length, 8); };
+function mergeState(local, cloud) {
+  const deleted = { ...(cloud.deleted || {}), ...(local.deleted || {}) };
+  for (const k of Object.keys(deleted)) if ((cloud.deleted || {})[k] > deleted[k]) deleted[k] = cloud.deleted[k];
+  const byId = (a = [], b = []) => {
+    const m = new Map();
+    for (const r of [...a, ...b]) {
+      const prev = m.get(r.id);
+      if (!prev || (r.at || '') > (prev.at || '')) m.set(r.id, r);
+    }
+    return [...m.values()].filter((r) => !(deleted[r.id] && deleted[r.id] > (r.at || '')));
+  };
+  const termKey = (t) => `${t.year}-${t.sem}`;
+  const terms = byId((local.terms || []).map((t) => ({ ...t, id: termKey(t), _id: t.id })), (cloud.terms || []).map((t) => ({ ...t, id: termKey(t), _id: t.id })))
+    .map(({ _id, ...t }) => ({ ...t, id: _id || t.id }))
+    .sort((a, b) => (a.year - b.year) || (a.sem - b.sem));
+  const settings = ((cloud.settings?.at || '') > (local.settings?.at || '')) ? cloud.settings : local.settings;
+  return { ...local, settings, terms, support: byId(local.support, cloud.support), moves: byId(local.moves, cloud.moves), deleted,
+    updatedAt: [local.updatedAt, cloud.updatedAt].filter(Boolean).sort().pop() };
+}
+const countAll = (st) => (st.support?.length || 0) + (st.moves?.length || 0) + (st.terms || []).filter((t) => t.paid > 0).length;
+
 let pushTimer = null, pushing = false;
 function cloudPush() {
   if (!session) return;
@@ -551,8 +581,9 @@ function cloudPush() {
       });
       if (res.status === 401) { saveSession(null); setSyncUI('로그인', ''); return; }
       if (!res.ok) throw new Error(await res.text());
+      logSync(`올림 · 기록 ${countAll(S)}건`);
       setSyncUI('☁ ' + new Date().toTimeString().slice(0, 5), 'on');
-    } catch (e) { console.error('cloudPush', e); setSyncUI('동기화 실패', 'err'); }
+    } catch (e) { console.error('cloudPush', e); logSync('올리기 실패: ' + e.message.slice(0, 60)); setSyncUI('동기화 실패', 'err'); }
     finally { pushing = false; }
   }, 600);   // 연타 저장을 묶는다
 }
@@ -563,22 +594,24 @@ async function cloudPull(reason) {
     if (res.status === 401) { saveSession(null); setSyncUI('로그인', ''); return; }
     if (!res.ok) throw new Error(await res.text());
     const rows = await res.json();
-    if (!rows.length) { cloudPush(); setSyncUI('☁ 첫 동기화', 'on'); return; }            // 클라우드가 비어 있으면 로컬을 올린다
-    const cloud = rows[0];
-    const cloudAt = cloud.data?.updatedAt || cloud.updated_at || '', localAt = S.updatedAt || '';
-    const localEmpty = !S.support.length && !S.moves.length && !S.terms.some((t) => t.paid > 0) && !S.settings.tuition;
-    if (cloudAt > localAt || localEmpty) {
-      S = cloud.data; S.moves ??= [];
-      try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {}
-      render(); toast(reason === 'login' ? '클라우드 장부를 불러왔어요' : '다른 기기의 변경을 받았어요');
-    } else if (localAt > cloudAt) { cloudPush(); }
+    if (!rows.length) { logSync('클라우드 비어 있음 → 올림'); cloudPush(); setSyncUI('☁ 첫 동기화', 'on'); return; }
+    const cloud = rows[0].data || {}; cloud.moves ??= []; cloud.deleted ??= {}; cloud.support ??= []; cloud.terms ??= [];
+    const before = JSON.stringify(S), merged = mergeState(S, cloud);
+    const changedLocal = JSON.stringify(merged) !== before;
+    const cloudLacks = JSON.stringify({ s: merged.support, m: merged.moves, t: merged.terms, g: merged.settings }) !== JSON.stringify({ s: cloud.support, m: cloud.moves, t: cloud.terms, g: cloud.settings });
+    S = merged;
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {}
+    logSync(`합침(${reason}) · 로컬 ${countAll(JSON.parse(before))} + 클라우드 ${countAll(cloud)} → ${countAll(S)}건`);
+    if (changedLocal) { render(); toast(reason === 'login' ? '클라우드 장부와 합쳤어요' : '다른 기기의 변경을 합쳤어요'); }
+    if (cloudLacks) cloudPush();   // 합친 결과가 클라우드와 다르면 올려서 맞춘다
     setSyncUI('☁ ' + new Date().toTimeString().slice(0, 5), 'on');
   } catch (e) { console.error('cloudPull', e); setSyncUI('동기화 실패', 'err'); }
 }
 function onSyncBtn() {
   if (!session) return openLogin();
   sheet(`<h2>클라우드 동기화</h2>
-    <p class="note" style="margin:0 0 12px">${esc(session.email || '')} 로 로그인됨. 저장할 때마다 클라우드에 올라가고, 다른 기기에서 열면 최신 저장이 내려와요.</p>
+    <p class="note" style="margin:0 0 12px">${esc(session.email || '')} 로 로그인됨. 저장할 때마다 올라가고, 다른 기기와는 기록 단위로 합쳐요(같은 기록은 더 최근 것).</p>
+    <div class="list" style="padding:10px 12px;font-size:12px;color:var(--ink-2);line-height:1.7">${syncLog.length ? syncLog.map(esc).join('<br>') : '아직 동기화 기록 없음'}</div>
     <div class="sheet-btns">
       <button class="btn danger" type="button" onclick="signOut()">로그아웃</button>
       <button class="btn" type="button" onclick="closeSheet();cloudPull('manual')">지금 동기화</button>
