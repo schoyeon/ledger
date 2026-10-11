@@ -126,7 +126,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v4</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v5</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -447,6 +447,7 @@ function saveTerm(id) {
 }
 
 function openSupport(id) {
+  id = id || '';   // 버튼에서 인자 없이 부르면 undefined → 템플릿에 'undefined' 글자가 들어가 수정 경로로 빠지던 버그
   const s = id ? S.support.find((x) => x.id === id) : { id: '', date: today(), total: 0, salary: 0, memo: '' };
   if (!s) return;
   sheet(`<h2>${id ? '입금 수정' : '지원금 입금'}</h2>
@@ -484,6 +485,7 @@ function saveSupport(id) {
 function delSupport(id) { if (!confirm('이 입금 기록을 삭제할까요?')) return; S.support = S.support.filter((x) => x.id !== id); S.deleted[id] = new Date().toISOString(); save(); render(); closeSheet(); toast('삭제했어요'); }
 
 function openMove(id) {
+  id = id || '';
   const m = id ? S.moves.find((x) => x.id === id) : { id: '', date: today(), kind: 'use', amount: 0, memo: '' };
   if (!m) return;
   const c = calc();
