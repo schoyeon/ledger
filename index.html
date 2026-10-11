@@ -119,6 +119,11 @@
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 999px; font-size: 13px; opacity: 0; transition: .2s; pointer-events: none; z-index: 60; }
   .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
   @media (max-width: 380px) { .tile .val { font-size: 19px; } .tile.hero .val { font-size: 24px; } .row { grid-template-columns: 56px 1fr auto; padding: 11px 12px; } }
+
+  /* 날짜 칸: 어디를 눌러도 달력이 열리고, 아이콘도 크게 */
+  input[type="date"] { cursor: pointer; min-height: 44px; }
+  input[type="date"]::-webkit-calendar-picker-indicator { width: 24px; height: 24px; padding: 4px; cursor: pointer; opacity: 0.8; }
+  input[type="date"]::-webkit-date-and-time-value { text-align: left; }
 </style>
 </head>
 <body>
@@ -126,7 +131,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v5</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v6</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -667,6 +672,9 @@ render();
 if (session) { setSyncUI('☁ 확인 중', 'on'); cloudPull('boot'); }
 else if (!S.settings.tuition) { selectTab('settings'); toast('학기당 등록금을 넣고 저장하세요'); }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && session && !pushing) cloudPull('resume'); });
+
+// 날짜 칸은 칸 전체를 눌러도 달력이 열리게 (showPicker 지원 브라우저)
+document.addEventListener('click', (e) => { const el = e.target; if (el && el.tagName === 'INPUT' && el.type === 'date' && typeof el.showPicker === 'function') { try { el.showPicker(); } catch {} } });
 </script>
 </body>
 </html>
