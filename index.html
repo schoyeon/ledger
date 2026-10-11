@@ -126,7 +126,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v3</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v4</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -234,7 +234,9 @@ const uid = () => Date.now() + Math.random().toString(16).slice(2, 6);
 // 학기의 '납부 시점' 기준일: 1학기는 그 해 2월 말, 2학기는 8월 말
 const termDueDate = (t) => `${t.year}-${t.sem === 1 ? '02-25' : '08-25'}`;
 const termStatus = (t) => t.leave ? 'leave' : (t.paid > 0 ? (t.paid >= t.tuition ? 'paid' : 'partial') : (termDueDate(t) < today() ? 'overdue' : 'upcoming'));
-function toast(m) { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 2200); }
+function toast(m, long) { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), long ? 6000 : 2200); }
+window.addEventListener('error', (e) => { const m = `오류: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`; toast(m, true); try { logSync(m); } catch {} });
+window.addEventListener('unhandledrejection', (e) => { const m = '오류: ' + (e.reason?.message || e.reason); toast(m, true); try { logSync(m); } catch {} });
 
 // ───────────── 계산 ─────────────
 function calc() {
@@ -466,11 +468,18 @@ function calcSupport() {
   document.getElementById('sCalc').textContent = t ? `+${won(Math.max(0, t - sal))}` + (sal > t ? ' (월급이 총액보다 커요)' : '') : '총액을 입력하세요';
 }
 function saveSupport(id) {
-  const rec = { id: id || uid(), date: document.getElementById('sDate').value || today(), total: parseWon(document.getElementById('sTotal').value), salary: parseWon(document.getElementById('sSalary').value), memo: document.getElementById('sMemo').value.trim() };
-  if (!rec.total) return toast('입금 총액을 입력하세요');
-  const r = stamp(rec);
-  if (id) S.support = S.support.map((x) => x.id === id ? r : x); else S.support.push(r);
-  save(); render(); closeSheet(); toast(id ? '수정됐어요' : '추가됐어요');
+  let step = '읽기';
+  try {
+    const rec = { id: id || uid(), date: document.getElementById('sDate').value || today(), total: parseWon(document.getElementById('sTotal').value), salary: parseWon(document.getElementById('sSalary').value), memo: document.getElementById('sMemo').value.trim() };
+    if (!rec.total) return toast('입금 총액을 입력하세요 (숫자만, 예: 2273600)', true);
+    const r = stamp(rec);
+    S.support ??= [];
+    step = '추가';
+    if (id) S.support = S.support.map((x) => x.id === id ? r : x); else S.support.push(r);
+    step = '저장'; save();
+    step = '그리기'; render();
+    closeSheet(); toast(id ? '수정됐어요' : `추가됐어요 (지원금 ${S.support.length}건)`);
+  } catch (e) { toast(`지원금 저장 실패 — ${step} 단계: ${e.message}`, true); try { logSync('지원금 저장 실패 ' + step + ': ' + e.message); } catch {} }
 }
 function delSupport(id) { if (!confirm('이 입금 기록을 삭제할까요?')) return; S.support = S.support.filter((x) => x.id !== id); S.deleted[id] = new Date().toISOString(); save(); render(); closeSheet(); toast('삭제했어요'); }
 
