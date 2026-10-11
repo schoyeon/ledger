@@ -120,10 +120,27 @@
   .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
   @media (max-width: 380px) { .tile .val { font-size: 19px; } .tile.hero .val { font-size: 24px; } .row { grid-template-columns: 56px 1fr auto; padding: 11px 12px; } }
 
-  /* 날짜 칸: 어디를 눌러도 달력이 열리고, 아이콘도 크게 */
-  input[type="date"] { cursor: pointer; min-height: 44px; }
-  input[type="date"]::-webkit-calendar-picker-indicator { width: 24px; height: 24px; padding: 4px; cursor: pointer; opacity: 0.8; }
-  input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+
+  /* ── 앱 자체 달력 (브라우저 달력이 작아서) ── */
+  input.dp { cursor: pointer; min-height: 44px; }
+  input.dp:empty::placeholder { color: var(--ink-3); }
+  .dp-overlay { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center; }
+  .dp { width: 100%; max-width: 420px; background: var(--surface); border-radius: 16px 16px 0 0; padding: 14px 14px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .dp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .dp-head .ttl { font-size: 18px; font-weight: 800; }
+  .dp-head button { font-size: 22px; width: 44px; height: 44px; border-radius: 10px; background: var(--bg); }
+  .dp-week { display: grid; grid-template-columns: repeat(7, 1fr); font-size: 12px; color: var(--ink-3); text-align: center; margin-bottom: 4px; }
+  .dp-week span:first-child { color: #d9534f; }
+  .dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .dp-grid button { height: 46px; border-radius: 10px; font-size: 16px; font-weight: 600; background: var(--bg); }
+  .dp-grid button.other { opacity: 0.35; }
+  .dp-grid button.today { box-shadow: inset 0 0 0 2px var(--accent); }
+  .dp-grid button.sel { background: var(--accent); color: #fff; }
+  .dp-grid button:nth-child(7n+1) { color: #d9534f; }
+  .dp-grid button.sel:nth-child(7n+1) { color: #fff; }
+  .dp-foot { display: flex; gap: 8px; margin-top: 10px; }
+  .dp-foot button { flex: 1; height: 44px; border-radius: 10px; font-weight: 700; background: var(--bg); font-size: 14px; }
+  .dp-foot button.ok { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -131,7 +148,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v6</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v7</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -673,8 +690,54 @@ if (session) { setSyncUI('☁ 확인 중', 'on'); cloudPull('boot'); }
 else if (!S.settings.tuition) { selectTab('settings'); toast('학기당 등록금을 넣고 저장하세요'); }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && session && !pushing) cloudPull('resume'); });
 
-// 날짜 칸은 칸 전체를 눌러도 달력이 열리게 (showPicker 지원 브라우저)
 document.addEventListener('click', (e) => { const el = e.target; if (el && el.tagName === 'INPUT' && el.type === 'date' && typeof el.showPicker === 'function') { try { el.showPicker(); } catch {} } });
+
+// ── 앱 자체 달력: 모든 <input type="date"> 를 읽기전용 텍스트로 바꾸고, 누르면 큰 달력 시트를 띄운다 ──
+(function () {
+  const KST_TODAY = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  function convert(root) {
+    root.querySelectorAll('input[type="date"]').forEach((el) => { el.type = 'text'; el.readOnly = true; el.classList.add('dp'); el.placeholder = '날짜 선택'; el.setAttribute('inputmode', 'none'); });
+  }
+  new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => { if (n.nodeType === 1) convert(n); }))).observe(document.body, { childList: true, subtree: true });
+  convert(document);
+  let host = null, view = null;
+  function open(el) {
+    host = el;
+    const v = /^\d{4}-\d{2}-\d{2}$/.test(el.value) ? el.value : KST_TODAY();
+    view = { y: Number(v.slice(0, 4)), m: Number(v.slice(5, 7)) };
+    draw();
+  }
+  function draw() {
+    const today = KST_TODAY(), sel = host.value;
+    const first = new Date(Date.UTC(view.y, view.m - 1, 1)), startDow = first.getUTCDay();
+    const dim = new Date(Date.UTC(view.y, view.m, 0)).getUTCDate(), prevDim = new Date(Date.UTC(view.y, view.m - 1, 0)).getUTCDate();
+    const cells = [];
+    for (let i = 0; i < 42; i++) {
+      const n = i - startDow + 1;
+      let y = view.y, m = view.m, d = n, other = false;
+      if (n < 1) { other = true; d = prevDim + n; m -= 1; if (m < 1) { m = 12; y -= 1; } }
+      else if (n > dim) { other = true; d = n - dim; m += 1; if (m > 12) { m = 1; y += 1; } }
+      const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      cells.push(`<button type="button" data-iso="${iso}" class="${other ? 'other' : ''} ${iso === today ? 'today' : ''} ${iso === sel ? 'sel' : ''}">${d}</button>`);
+    }
+    let box = document.getElementById('dpOverlay');
+    if (!box) { box = document.createElement('div'); box.id = 'dpOverlay'; box.className = 'dp-overlay'; document.body.appendChild(box); box.addEventListener('click', (e) => { if (e.target === box) close(); }); }
+    box.innerHTML = `<div class="dp">
+      <div class="dp-head"><button type="button" data-nav="-1">‹</button><div class="ttl">${view.y}년 ${view.m}월</div><button type="button" data-nav="1">›</button></div>
+      <div class="dp-week"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+      <div class="dp-grid">${cells.join('')}</div>
+      <div class="dp-foot"><button type="button" data-act="clear">지우기</button><button type="button" data-act="today">오늘</button><button type="button" data-act="close" class="ok">닫기</button></div></div>`;
+    box.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => { view.m += Number(b.dataset.nav); if (view.m < 1) { view.m = 12; view.y -= 1; } if (view.m > 12) { view.m = 1; view.y += 1; } draw(); }));
+    box.querySelectorAll('[data-iso]').forEach((b) => b.addEventListener('click', () => pick(b.dataset.iso)));
+    box.querySelector('[data-act="clear"]').addEventListener('click', () => pick(''));
+    box.querySelector('[data-act="today"]').addEventListener('click', () => pick(today));
+    box.querySelector('[data-act="close"]').addEventListener('click', close);
+  }
+  function pick(iso) { host.value = iso; host.dispatchEvent(new Event('input', { bubbles: true })); host.dispatchEvent(new Event('change', { bubbles: true })); close(); }
+  function close() { const b = document.getElementById('dpOverlay'); if (b) b.remove(); host = null; }
+  document.addEventListener('click', (e) => { const el = e.target; if (el && el.tagName === 'INPUT' && el.classList.contains('dp')) { e.preventDefault(); open(el); } });
+  document.addEventListener('focusin', (e) => { const el = e.target; if (el && el.classList && el.classList.contains('dp')) el.blur(); });
+})();
 </script>
 </body>
 </html>
