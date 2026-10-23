@@ -148,7 +148,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v12</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v13</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -246,7 +246,7 @@ function save() {
 
 // ───────────── 유틸 ─────────────
 const won = (n) => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('ko-KR') + '원';
-const manwon = (n) => { const m = Math.round(n / 10000); return (m).toLocaleString('ko-KR') + '만'; };
+const manwon = (n) => { const m = Math.round(n / 1000) / 10; return (Number.isInteger(m) ? m : m.toFixed(1)).toLocaleString('ko-KR') + '만'; };   // 745,600 → 74.6만 (반올림으로 뭉개지 않게)
 const parseWon = (s) => Number(String(s ?? '').replace(/[^\d.-]/g, '')) || 0;
 const fmtInput = (el) => { const v = parseWon(el.value); el.value = v ? v.toLocaleString('ko-KR') : ''; };
 const termLabel = (t) => `${t.year}-${t.sem}`;                       // 달력 기준 (2026-2)
@@ -380,7 +380,7 @@ function render() {
   }
   sl.innerHTML = sorted.length ? groups.map((g) => {
     const sum = sumTerm(g, 0), sumA = sumTerm(g, assumeSalary);
-    return `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(sum)}${assumeSalary && sumA !== sum ? `<small style="color:var(--warn)">월급 ${manwon(assumeSalary)}원 가정 시 이 학기 지원 ${won(sumA)}</small>` : ''}</div></div>`
+    return `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(sum)}${assumeSalary && sumA !== sum ? `<small style="color:var(--warn)">월급 ${won(assumeSalary)} 가정 시 이 학기 지원 ${won(sumA)}</small>` : ''}</div></div>`
     + g.months.map((k) => {
       const tot = monthTotal(k), sal = monthSalaryOf(k), sup = monthSupport(k), supA = monthSupport(k, assumeSalary), items = monthDeposits(k).sort((x, y) => y.date.localeCompare(x.date));
       const salText = sal ? `− 월급 ${won(sal)}` : (assumeSalary ? `<span style="color:var(--warn)">− 월급 ${won(Math.min(assumeSalary, tot))}(가정)</span>` : '<span style="color:var(--ink-3)">월급 미정</span>');
