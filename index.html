@@ -148,7 +148,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v10</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v11</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -194,7 +194,7 @@
       <span class="note" style="margin:0;flex-basis:100%">월급이 비어 있는 입금에 “가정 시 지원분”을 옆에 보여줘요. 저장되진 않아요 — 확정되면 “월급 일괄 적용”.</span>
     </div>
     <div class="list" id="supportList"></div>
-    <p class="note">월급과 섞여 들어온 날은 <b>입금 총액</b>과 <b>그중 월급</b>을 적으면 나머지가 등록금 지원분으로 잡혀요. 월급을 아직 모르면 총액만 넣어두고, 나중에 <b>월급 일괄 적용</b>으로 한 번에 채우세요.</p>
+    <p class="note">입금은 들어온 대로 전부 적고(한 달에 여러 번도 OK), 월급은 <b>달 줄을 눌러 달마다 한 번</b> 넣어요. 그 달 입금 합계 − 월급 = 그 달 지원분. 월급을 아직 모르면 비워두고, 위 “월급 가정”으로 미리 보거나 나중에 <b>월급 일괄 적용</b>으로 한 번에 채우세요.</p>
   </section>
 
   <section class="panel" id="panel-moves">
@@ -232,9 +232,10 @@ const defaultState = () => ({
   support: [],    // {id, date, total, salary, memo}  → 지원분 = total - salary
   moves: [],      // {id, date, kind:'use'|'refill', amount, memo}  등록금 돈을 꺼내 씀 / 다시 채움
   deleted: {},    // {id: 삭제시각}  기기 간 합칠 때 되살아나지 않게
+  monthSalary: {},// {'YYYY-MM': {amount, at}}  그 달 월급 (입금이 여러 번 나뉘어 들어와도 월급은 달에 한 번)
 });
 let S = load();
-function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.settings) { v.moves ??= []; v.deleted ??= {}; return v; } } catch {} return defaultState(); }
+function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.settings) { v.moves ??= []; v.deleted ??= {}; v.monthSalary ??= {}; return v; } } catch {} return defaultState(); }
 const stamp = (r) => ({ ...r, at: new Date().toISOString() });   // 기록 단위 수정 시각
 function save() {
   S.updatedAt = new Date().toISOString();
@@ -254,13 +255,21 @@ const semRange = (sem) => sem === 1 ? '3월~8월' : '9월~2월';
 const currentCal = () => { const { y, m } = kstParts(); return m >= 3 && m <= 8 ? { year: y, sem: 1 } : { year: m >= 9 ? y : y - 1, sem: 2 }; };
 const isCurrent = (t) => { const c = currentCal(); return t.year === c.year && t.sem === c.sem; };
 const termOfDate = (iso) => { const y = Number(iso.slice(0, 4)), m = Number(iso.slice(5, 7)); return m >= 3 && m <= 8 ? { year: y, sem: 1 } : { year: m >= 9 ? y : y - 1, sem: 2 }; };
-const supportInTerm = (t) => S.support.filter((x) => { const k = termOfDate(x.date); return k.year === t.year && k.sem === t.sem; }).reduce((a, x) => a + Math.max(0, (x.total || 0) - (x.salary || 0)), 0);
+const supportInTerm = (t) => allMonths().filter((k) => { const c = termOfDate(k + '-01'); return c.year === t.year && c.sem === t.sem; }).reduce((a, k) => a + monthSupport(k), 0);
 const termTitle = (year, sem) => { const i = S.terms.findIndex((t) => t.year === year && t.sem === sem); return `${year}년 ${sem}학기${i >= 0 ? ` (${progLabel(i)})` : ''} · ${semRange(sem)}`; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtD = (d) => d ? d.slice(2).replace(/-/g, '.') : '—';   // 2026-09-25 → 26.09.25
 let assumeSalary = (() => { try { return Number(localStorage.getItem('tuition1_assume')) || 0; } catch { return 0; } })();   // 미리보기용, 장부 데이터와 별개
 function setAssume(v) { assumeSalary = parseWon(v); try { localStorage.setItem('tuition1_assume', String(assumeSalary)); } catch {} render(); }
-const supWith = (x) => Math.max(0, (x.total || 0) - (x.salary || (assumeSalary ? Math.min(assumeSalary, x.total || 0) : 0)));   // 가정 적용 지원분 (입금 ≤ 월급이면 0)
+// ── 달 단위: 그 달 입금 합계 − 그 달 월급 = 그 달 지원분 ──
+const ym = (iso) => (iso || '').slice(0, 7);
+const monthDeposits = (k) => S.support.filter((x) => ym(x.date) === k);
+const monthTotal = (k) => monthDeposits(k).reduce((a, x) => a + (x.total || 0), 0);
+// 그 달 월급: monthSalary 에 정한 값 > 없으면 입금들에 적어둔 '그중 월급' 합(옛 방식 호환) > 없으면 0
+const monthSalaryOf = (k) => (S.monthSalary?.[k]?.amount) ?? monthDeposits(k).reduce((a, x) => a + (x.salary || 0), 0);
+const monthSupport = (k, assume = 0) => { const t = monthTotal(k); const sal = monthSalaryOf(k) || (assume ? Math.min(assume, t) : 0); return Math.max(0, t - Math.min(sal, t)); };
+const allMonths = () => [...new Set(S.support.map((x) => ym(x.date)))].sort();
+const supportTotalAll = () => allMonths().reduce((a, k) => a + monthSupport(k), 0);
 // 날짜는 항상 한국 시간(Asia/Seoul) 기준 — 기기 시간대가 달라도 학기 판정이 흔들리지 않게
 const kstParts = () => { const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).reduce((a, x) => ((a[x.type] = x.value), a), {}); return { y: Number(p.year), m: Number(p.month), d: Number(p.day), iso: `${p.year}-${p.month}-${p.day}` }; };
 const today = () => kstParts().iso;
@@ -280,7 +289,7 @@ function calc() {
   const paidTerms = active.filter((t) => t.paid > 0).length;
   const remaining = totalTuition - paid;
   const remainingTerms = active.filter((t) => t.paid <= 0 || t.paid < t.tuition).length;
-  const supportTotal = S.support.reduce((a, s) => a + Math.max(0, (s.total || 0) - (s.salary || 0)), 0);
+  const supportTotal = supportTotalAll();
   const balance = supportTotal - paid;                                  // 있어야 할 돈
   const used = S.moves.filter((m) => m.kind === 'use').reduce((a, m) => a + (m.amount || 0), 0);
   const refilled = S.moves.filter((m) => m.kind === 'refill').reduce((a, m) => a + (m.amount || 0), 0);
@@ -294,7 +303,7 @@ function calc() {
 // 시간순 이벤트 → 누적 잔액 (그래프용)
 function timeline() {
   const ev = [];
-  for (const s of S.support) ev.push({ date: s.date, delta: Math.max(0, (s.total || 0) - (s.salary || 0)), label: `지원 +${manwon(Math.max(0, (s.total || 0) - (s.salary || 0)))}`, kind: 'support' });
+  for (const k of allMonths()) { const sup = monthSupport(k); if (!sup) continue; const last = monthDeposits(k).map((x) => x.date).sort().pop(); ev.push({ date: last, delta: sup, label: `${k.replace('-', '.')} 지원 +${manwon(sup)}`, kind: 'support' }); }
   for (const t of S.terms) if (!t.leave && t.paid > 0) ev.push({ date: t.paidDate || termDueDate(t), delta: -t.paid, label: `${progLabel(S.terms.indexOf(t))} 납부 −${manwon(t.paid)}`, kind: 'pay' });
   for (const m of S.moves) ev.push({ date: m.date, delta: 0, move: m.kind === 'use' ? -(m.amount || 0) : (m.amount || 0), label: `${m.kind === 'use' ? '꺼내 씀 −' : '채워 넣음 +'}${manwon(m.amount || 0)}`, kind: m.kind });
   ev.sort((a, b) => a.date.localeCompare(b.date));
@@ -354,16 +363,26 @@ function render() {
   // 지원금
   const sl = document.getElementById('supportList');
   const sorted = S.support.slice().sort((a, b) => b.date.localeCompare(a.date));
-  const groups = [];   // 학기별 묶음 (최신 학기부터)
-  for (const s of sorted) { const k = termOfDate(s.date); const key = `${k.year}-${k.sem}`; let g = groups.find((x) => x.key === key); if (!g) { g = { key, ...k, items: [], sum: 0, sumA: 0 }; groups.push(g); } g.items.push(s); g.sum += Math.max(0, (s.total || 0) - (s.salary || 0)); g.sumA += supWith(s); }
   const ai = document.getElementById('assumeSalary'); if (ai && document.activeElement !== ai) ai.value = assumeSalary ? assumeSalary.toLocaleString('ko-KR') : '';
-  sl.innerHTML = sorted.length ? groups.map((g) => `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(g.sum)}${assumeSalary && g.sumA !== g.sum ? `<small style="color:var(--warn)">가정 시 ${won(g.sumA)}</small>` : ''}</div></div>` + g.items.map((s) => {
-    const sup = Math.max(0, (s.total || 0) - (s.salary || 0)), supA = supWith(s);
-    return `<div class="row" onclick="openSupport('${s.id}')">
-      <div class="k">${s.date.slice(2, 7).replace('-', '.')}<span class="s">${s.date.slice(8)}일</span></div>
-      <div class="m">${s.salary ? `입금 <b class="num">${won(s.total)}</b> − 월급 ${won(s.salary)}` : `입금 <b class="num">${won(s.total)}</b> (월급 미입력)`}<span class="memo">${esc(s.memo || '')}</span></div>
-      <div class="v num">+${won(sup)}<small>지원분</small>${assumeSalary && !s.salary && supA !== sup ? `<small style="color:var(--warn)">가정 시 +${won(supA)}</small>` : ''}</div></div>`;
-  }).join('')).join('') : '<div class="empty">아직 입금 기록이 없어요. “+ 입금 추가”로 시작하세요.</div>';
+  const months = allMonths().reverse();
+  const groups = [];   // 학기 묶음 (최신부터) → 그 안에 달
+  for (const k of months) { const c = termOfDate(k + '-01'); const key = `${c.year}-${c.sem}`; let g = groups.find((x) => x.key === key); if (!g) { g = { key, ...c, months: [] }; groups.push(g); } g.months.push(k); }
+  const sumTerm = (g, assume) => g.months.reduce((a, k) => a + monthSupport(k, assume), 0);
+  sl.innerHTML = sorted.length ? groups.map((g) => {
+    const sum = sumTerm(g, 0), sumA = sumTerm(g, assumeSalary);
+    return `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(sum)}${assumeSalary && sumA !== sum ? `<small style="color:var(--warn)">가정 시 ${won(sumA)}</small>` : ''}</div></div>`
+    + g.months.map((k) => {
+      const tot = monthTotal(k), sal = monthSalaryOf(k), sup = monthSupport(k), supA = monthSupport(k, assumeSalary), items = monthDeposits(k).sort((x, y) => y.date.localeCompare(x.date));
+      const salText = sal ? `− 월급 ${won(sal)}` : (assumeSalary ? `<span style="color:var(--warn)">− 월급 가정 ${won(Math.min(assumeSalary, tot))}</span>` : '<span style="color:var(--ink-3)">월급 미정</span>');
+      return `<div class="row" style="grid-template-columns:1fr auto;padding:9px 14px;border-top:1px solid var(--line)" onclick="openMonthSalary('${k}')">
+          <div class="m"><b>${k.replace('-', '년 ')}월</b> · 입금 ${items.length}건 <b class="num">${won(tot)}</b> ${salText}<span class="memo">누르면 이 달 월급 입력</span></div>
+          <div class="v num">${sal ? '+' + won(sup) : (assumeSalary ? `<span style="color:var(--warn)">+${won(supA)}</span>` : '+' + won(sup))}<small>이 달 지원분</small></div></div>`
+        + items.map((s) => `<div class="row" onclick="openSupport('${s.id}')" style="padding-left:28px">
+          <div class="k">${s.date.slice(2, 7).replace('-', '.')}<span class="s">${s.date.slice(8)}일</span></div>
+          <div class="m">입금 <b class="num">${won(s.total)}</b><span class="memo">${esc(s.memo || '')}</span></div>
+          <div class="v" style="font-weight:500;color:var(--ink-3);font-size:12px">수정</div></div>`).join('');
+    }).join('');
+  }).join('') : '<div class="empty">아직 입금 기록이 없어요. “+ 입금 추가”로 시작하세요.</div>';
 
   // 쓴 돈
   const ml = document.getElementById('moveList');
@@ -489,11 +508,9 @@ function openSupport(id) {
   if (!s) return;
   sheet(`<h2>${id ? '입금 수정' : '지원금 입금'}</h2>
     <div class="field"><label>입금일</label><input id="sDate" type="date" value="${s.date}"></div>
-    <div class="grid2">
-      <div class="field"><label>입금 총액 (원)</label><input id="sTotal" type="text" inputmode="numeric" value="${s.total ? s.total.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this);calcSupport()" oninput="calcSupport()"></div>
-      <div class="field"><label>그중 월급 (원)</label><input id="sSalary" type="text" inputmode="numeric" value="${s.salary ? s.salary.toLocaleString('ko-KR') : ''}" placeholder="0" onblur="fmtInput(this);calcSupport()" oninput="calcSupport()"></div>
-    </div>
-    <div class="field"><label>등록금 지원분</label><div class="calc" id="sCalc" style="font-size:15px;font-weight:700;color:var(--plus)"></div></div>
+    <div class="field"><label>입금 총액 (원)</label><input id="sTotal" type="text" inputmode="numeric" value="${s.total ? s.total.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this);calcSupport()" oninput="calcSupport()"></div>
+    <input id="sSalary" type="hidden" value="${s.salary || ''}">
+    <div class="calc" id="sCalc" style="margin:-4px 0 10px">월급은 입금마다가 아니라 <b>달</b>마다 한 번 정해요 — 지원금 탭에서 그 달 줄을 누르면 돼요. 한 달에 여러 번 나눠 들어와도 전부 입금으로만 적으세요.</div>
     <div class="field"><label>메모</label><input id="sMemo" type="text" value="${esc(s.memo || '')}" placeholder="예: 9월 월급과 함께, 2학기분 미리"></div>
     <div class="sheet-btns">
       ${id ? `<button class="btn danger" type="button" onclick="delSupport('${id}')">삭제</button>` : ''}
@@ -501,10 +518,7 @@ function openSupport(id) {
       <button class="btn primary" type="button" onclick="saveSupport('${id}')">저장</button></div>`);
   calcSupport();
 }
-function calcSupport() {
-  const t = parseWon(document.getElementById('sTotal').value), sal = parseWon(document.getElementById('sSalary').value);
-  document.getElementById('sCalc').textContent = t ? `+${won(Math.max(0, t - sal))}` + (sal > t ? ' (월급이 총액보다 커요)' : '') : '총액을 입력하세요';
-}
+function calcSupport() { /* 달 단위 계산으로 바뀌어 입금 시트에선 계산하지 않는다 */ }
 function saveSupport(id) {
   let step = '읽기';
   try {
@@ -552,41 +566,59 @@ function saveMove(id) {
 }
 function delMove(id) { if (!confirm('이 기록을 삭제할까요?')) return; S.moves = S.moves.filter((x) => x.id !== id); S.deleted[id] = new Date().toISOString(); save(); render(); closeSheet(); toast('삭제했어요'); }
 
+// ───────────── 이 달 월급 ─────────────
+function openMonthSalary(k) {
+  const tot = monthTotal(k), cur = monthSalaryOf(k), items = monthDeposits(k).sort((a, b) => a.date.localeCompare(b.date));
+  sheet(`<h2>${k.replace('-', '년 ')}월 월급</h2>
+    <p class="note" style="margin:0 0 10px">이 달 입금 ${items.length}건 합계 <b>${won(tot)}</b>. 여기에 그 달 월급을 넣으면 나머지가 지원분이에요. 월급만 들어온 달이면 입금 합계와 같게.</p>
+    <div class="list" style="margin-bottom:10px">${items.map((x) => `<div class="spend" style="padding:7px 12px"><span>${fmtD(x.date)} ${esc(x.memo || '')}</span><span class="num">${won(x.total)}</span></div>`).join('')}</div>
+    <div class="field"><label>이 달 월급 (원)</label><input id="msAmt" type="text" inputmode="numeric" value="${cur ? cur.toLocaleString('ko-KR') : ''}" placeholder="예: 773,600" onblur="fmtInput(this)"></div>
+    <div class="chips" style="margin:-4px 0 10px">
+      ${assumeSalary ? `<button type="button" onclick="document.getElementById('msAmt').value='${assumeSalary.toLocaleString('ko-KR')}'">가정값 ${won(assumeSalary)}</button>` : ''}
+      <button type="button" onclick="document.getElementById('msAmt').value='${tot.toLocaleString('ko-KR')}'">월급만 들어온 달 (= 합계)</button>
+      <button type="button" onclick="document.getElementById('msAmt').value=''">지우기</button></div>
+    <div class="sheet-btns"><button class="btn" type="button" onclick="closeSheet()">취소</button><button class="btn primary" type="button" onclick="saveMonthSalary('${k}')">저장</button></div>`);
+}
+function saveMonthSalary(k) {
+  const v = parseWon(document.getElementById('msAmt').value);
+  S.monthSalary ??= {};
+  S.monthSalary[k] = { amount: v, at: new Date().toISOString() };
+  save(); render(); closeSheet(); toast(v ? `${k.replace('-', '.')} 월급 ${won(v)} 저장` : `${k.replace('-', '.')} 월급 지움`);
+}
+
 // ───────────── 월급 일괄 적용 + 역산 도우미 ─────────────
 function openSalaryTool() {
-  if (!S.support.length) return toast('먼저 입금 기록을 넣어주세요');
-  const rows = S.support.slice().sort((a, b) => b.date.localeCompare(a.date));
+  const months = allMonths().reverse(); if (!months.length) return toast('먼저 입금 기록을 넣어주세요');
   sheet(`<h2>월급 일괄 적용</h2>
-    <p class="note" style="margin:0 0 10px">세후 월급을 넣고 적용하면 체크한 입금 기록의 "그중 월급"이 한 번에 채워져요. 지원분 = 총액 − 월급으로 다시 계산됩니다.</p>
-    <div class="field"><label>세후 월급 (원)</label><input id="bsSalary" type="text" inputmode="numeric" placeholder="예: 773,600" onblur="fmtInput(this)"></div>
+    <p class="note" style="margin:0 0 10px">세후 월급을 넣고 적용하면 체크한 달의 월급이 한 번에 채워져요. 달 지원분 = 그 달 입금 합계 − 월급.</p>
+    <div class="field"><label>세후 월급 (원)</label><input id="bsSalary" type="text" inputmode="numeric" placeholder="예: 773,600" value="${assumeSalary ? assumeSalary.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this)"></div>
     <div class="field" style="background:var(--bg);border-radius:10px;padding:10px 12px">
-      <label>모르면 역산: 등록금이 섞인 입금을 고르고, 그때 포함된 등록금을 적으면</label>
+      <label>모르면 역산: 등록금이 섞인 달을 고르고, 그 달에 포함된 등록금을 적으면</label>
       <div class="grid2" style="margin-top:6px">
-        <select id="bsPick">${rows.map((r) => `<option value="${r.id}">${fmtD(r.date)} · ${won(r.total)}</option>`).join('')}</select>
+        <select id="bsPick">${months.map((k) => `<option value="${k}">${k.replace('-', '.')} · 합계 ${won(monthTotal(k))}</option>`).join('')}</select>
         <input id="bsTuition" type="text" inputmode="numeric" placeholder="섞인 등록금 (원)" value="${S.settings.tuition ? S.settings.tuition.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this)">
       </div>
-      <div class="chips" style="margin-top:8px"><button type="button" onclick="bsReverse()">월급 = 입금 − 등록금 으로 채우기</button></div>
+      <div class="chips" style="margin-top:8px"><button type="button" onclick="bsReverse()">월급 = 그 달 합계 − 등록금 으로 채우기</button></div>
       <div class="calc" id="bsHint" style="margin-top:6px"></div>
     </div>
-    <div class="field"><label>적용할 입금 (기본: 월급이 비어 있는 것)</label>
-      <div class="list" style="max-height:220px;overflow:auto">${rows.map((r) => `<label class="spend" style="padding:8px 12px;cursor:pointer"><span><input type="checkbox" class="bsChk" value="${r.id}" ${r.salary ? '' : 'checked'}> ${fmtD(r.date)} · 총액 ${won(r.total)}</span><span class="num" style="color:var(--ink-3)">${r.salary ? '월급 ' + won(r.salary) : '월급 없음'}</span></label>`).join('')}</div></div>
+    <div class="field"><label>적용할 달 (기본: 월급이 비어 있는 달)</label>
+      <div class="list" style="max-height:220px;overflow:auto">${months.map((k) => `<label class="spend" style="padding:8px 12px;cursor:pointer"><span><input type="checkbox" class="bsChk" value="${k}" ${monthSalaryOf(k) ? '' : 'checked'}> ${k.replace('-', '.')} · 입금 ${monthDeposits(k).length}건 ${won(monthTotal(k))}</span><span class="num" style="color:var(--ink-3)">${monthSalaryOf(k) ? '월급 ' + won(monthSalaryOf(k)) : '월급 없음'}</span></label>`).join('')}</div></div>
     <div class="sheet-btns"><button class="btn" type="button" onclick="closeSheet()">취소</button><button class="btn primary" type="button" onclick="applySalary()">적용</button></div>`);
 }
 function bsReverse() {
-  const r = S.support.find((x) => x.id === document.getElementById('bsPick').value); if (!r) return;
+  const k = document.getElementById('bsPick').value, tot = monthTotal(k);
   const tu = parseWon(document.getElementById('bsTuition').value);
-  const sal = r.total - tu;
-  if (!tu || sal <= 0) { document.getElementById('bsHint').textContent = '등록금 금액을 확인하세요 (입금보다 작아야 해요)'; return; }
+  const sal = tot - tu;
+  if (!tu || sal <= 0) { document.getElementById('bsHint').textContent = '등록금 금액을 확인하세요 (그 달 합계보다 작아야 해요)'; return; }
   document.getElementById('bsSalary').value = sal.toLocaleString('ko-KR');
-  document.getElementById('bsHint').textContent = `${won(r.total)} − ${won(tu)} = 월급 ${won(sal)}` + (sal === 773600 ? ' (80만원 사업소득 3.3% 공제와 일치)' : sal === 729600 ? ' (80만원 기타소득 8.8% 공제와 일치)' : '');
+  document.getElementById('bsHint').textContent = `${won(tot)} − ${won(tu)} = 월급 ${won(sal)}` + (sal === 773600 ? ' (80만원 사업소득 3.3% 공제와 일치)' : sal === 729600 ? ' (80만원 기타소득 8.8% 공제와 일치)' : '');
 }
 function applySalary() {
   const sal = parseWon(document.getElementById('bsSalary').value); if (!sal) return toast('월급을 입력하세요');
-  const ids = new Set([...document.querySelectorAll('.bsChk:checked')].map((c) => c.value)); if (!ids.size) return toast('적용할 입금을 체크하세요');
-  let n = 0;
-  // 입금이 월급보다 작거나 같으면 그 달은 월급만 들어온 것 → 월급 = 총액(지원분 0)
-  S.support = S.support.map((r) => { if (!ids.has(r.id)) return r; n += 1; return { ...r, salary: Math.min(sal, r.total), at: new Date().toISOString() }; });
-  save(); render(); closeSheet(); toast(`${n}건에 월급 ${won(sal)} 적용 (입금이 월급 이하인 달은 지원분 0)`);
+  const ks = [...document.querySelectorAll('.bsChk:checked')].map((c) => c.value); if (!ks.length) return toast('적용할 달을 체크하세요');
+  S.monthSalary ??= {};
+  for (const k of ks) S.monthSalary[k] = { amount: Math.min(sal, monthTotal(k)), at: new Date().toISOString() };   // 입금 ≤ 월급이면 월급만 들어온 달
+  save(); render(); closeSheet(); toast(`${ks.length}개 달에 월급 ${won(sal)} 적용`);
 }
 
 // ───────────── 백업/복원 ─────────────
@@ -597,7 +629,7 @@ function exportJSON() {
 function importJSON(file) {
   if (!file) return;
   const r = new FileReader();
-  r.onload = () => { try { const v = JSON.parse(r.result); if (!v.settings || !Array.isArray(v.terms)) throw 0; v.moves ??= []; v.deleted ??= {}; S = v; save(); render(); toast('복원했어요'); } catch { toast('파일 형식이 맞지 않아요'); } };
+  r.onload = () => { try { const v = JSON.parse(r.result); if (!v.settings || !Array.isArray(v.terms)) throw 0; v.moves ??= []; v.deleted ??= {}; v.monthSalary ??= {}; S = v; save(); render(); toast('복원했어요'); } catch { toast('파일 형식이 맞지 않아요'); } };
   r.readAsText(file);
 }
 
@@ -647,7 +679,9 @@ function mergeState(local, cloud) {
     .map(({ _id, ...t }) => ({ ...t, id: _id || t.id }))
     .sort((a, b) => (a.year - b.year) || (a.sem - b.sem));
   const settings = ((cloud.settings?.at || '') > (local.settings?.at || '')) ? cloud.settings : local.settings;
-  return { ...local, settings, terms, support: byId(local.support, cloud.support), moves: byId(local.moves, cloud.moves), deleted,
+  const monthSalary = { ...(cloud.monthSalary || {}) };
+  for (const [k, v] of Object.entries(local.monthSalary || {})) if (!monthSalary[k] || (v.at || '') > (monthSalary[k].at || '')) monthSalary[k] = v;
+  return { ...local, settings, terms, support: byId(local.support, cloud.support), moves: byId(local.moves, cloud.moves), deleted, monthSalary,
     updatedAt: [local.updatedAt, cloud.updatedAt].filter(Boolean).sort().pop() };
 }
 const countAll = (st) => (st.support?.length || 0) + (st.moves?.length || 0) + (st.terms || []).filter((t) => t.paid > 0).length;
@@ -680,10 +714,10 @@ async function cloudPull(reason) {
     if (!res.ok) throw new Error(await res.text());
     const rows = await res.json();
     if (!rows.length) { logSync('클라우드 비어 있음 → 올림'); cloudPush(); setSyncUI('☁ 첫 동기화', 'on'); return; }
-    const cloud = rows[0].data || {}; cloud.moves ??= []; cloud.deleted ??= {}; cloud.support ??= []; cloud.terms ??= [];
+    const cloud = rows[0].data || {}; cloud.moves ??= []; cloud.deleted ??= {}; cloud.support ??= []; cloud.terms ??= []; cloud.monthSalary ??= {};
     const before = JSON.stringify(S), merged = mergeState(S, cloud);
     const changedLocal = JSON.stringify(merged) !== before;
-    const cloudLacks = JSON.stringify({ s: merged.support, m: merged.moves, t: merged.terms, g: merged.settings }) !== JSON.stringify({ s: cloud.support, m: cloud.moves, t: cloud.terms, g: cloud.settings });
+    const cloudLacks = JSON.stringify({ s: merged.support, m: merged.moves, t: merged.terms, g: merged.settings, ms: merged.monthSalary }) !== JSON.stringify({ s: cloud.support, m: cloud.moves, t: cloud.terms, g: cloud.settings, ms: cloud.monthSalary || {} });
     S = merged;
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {}
     logSync(`합침(${reason}) · 로컬 ${countAll(JSON.parse(before))} + 클라우드 ${countAll(cloud)} → ${countAll(S)}건`);
