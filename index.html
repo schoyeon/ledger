@@ -148,7 +148,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v8</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v9</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -248,6 +248,9 @@ const semRange = (sem) => sem === 1 ? '3월~8월' : '9월~2월';
 // 지금이 어느 달력 학기인지: 3~8월 = 그 해 1학기, 9~2월 = 2학기 (1·2월은 전년도 2학기)
 const currentCal = () => { const { y, m } = kstParts(); return m >= 3 && m <= 8 ? { year: y, sem: 1 } : { year: m >= 9 ? y : y - 1, sem: 2 }; };
 const isCurrent = (t) => { const c = currentCal(); return t.year === c.year && t.sem === c.sem; };
+const termOfDate = (iso) => { const y = Number(iso.slice(0, 4)), m = Number(iso.slice(5, 7)); return m >= 3 && m <= 8 ? { year: y, sem: 1 } : { year: m >= 9 ? y : y - 1, sem: 2 }; };
+const supportInTerm = (t) => S.support.filter((x) => { const k = termOfDate(x.date); return k.year === t.year && k.sem === t.sem; }).reduce((a, x) => a + Math.max(0, (x.total || 0) - (x.salary || 0)), 0);
+const termTitle = (year, sem) => { const i = S.terms.findIndex((t) => t.year === year && t.sem === sem); return `${year}년 ${sem}학기${i >= 0 ? ` (${progLabel(i)})` : ''} · ${semRange(sem)}`; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtD = (d) => d ? d.slice(2).replace(/-/g, '.') : '—';   // 2026-09-25 → 26.09.25
 // 날짜는 항상 한국 시간(Asia/Seoul) 기준 — 기기 시간대가 달라도 학기 판정이 흔들리지 않게
@@ -336,20 +339,22 @@ function render() {
     const badge = { paid: ['plus', '납부'], partial: ['warn', '일부'], overdue: ['minus', '미납'], upcoming: ['muted', '예정'], leave: ['muted', '휴학'] }[st];
     return `<div class="row ${st === 'leave' ? 'dim' : ''}" onclick="openTerm('${t.id}')">
       <div class="k">${progLabel(i)}<span class="s">${t.year}년 ${t.sem}학기</span></div>
-      <div class="m">등록금 <b class="num">${won(t.tuition)}</b><span class="memo">${t.paid > 0 ? `${t.paidDate || ''} 납부 ${won(t.paid)}` : `${semRange(t.sem)}${t.memo ? ' · ' + esc(t.memo) : ''}`}</span></div>
+      <div class="m">등록금 <b class="num">${won(t.tuition)}</b>${(() => { const sp = supportInTerm(t); if (!sp && !t.tuition) return ''; const diff = sp - (t.tuition || 0); return ` · 지원 <b class="num">${won(sp)}</b> <span style="color:${diff >= 0 ? 'var(--plus)' : 'var(--minus)'};font-size:12px">${diff >= 0 ? '+' : ''}${won(diff)}</span>`; })()}<span class="memo">${t.paid > 0 ? `${t.paidDate || ''} 납부 ${won(t.paid)}` : `${semRange(t.sem)}${t.memo ? ' · ' + esc(t.memo) : ''}`}</span></div>
       <div class="v">${isCurrent(t) ? '<span class="badge" style="background:var(--accent-soft);color:var(--accent);margin-right:4px">현재</span>' : ''}<span class="badge ${badge[0]}">${badge[1]}</span></div></div>`;
   }).join('') : '<div class="empty">설정 탭에서 시작 학기·등록금을 저장하면 학기가 생성돼요.</div>';
 
   // 지원금
   const sl = document.getElementById('supportList');
   const sorted = S.support.slice().sort((a, b) => b.date.localeCompare(a.date));
-  sl.innerHTML = sorted.length ? sorted.map((s) => {
+  const groups = [];   // 학기별 묶음 (최신 학기부터)
+  for (const s of sorted) { const k = termOfDate(s.date); const key = `${k.year}-${k.sem}`; let g = groups.find((x) => x.key === key); if (!g) { g = { key, ...k, items: [], sum: 0 }; groups.push(g); } g.items.push(s); g.sum += Math.max(0, (s.total || 0) - (s.salary || 0)); }
+  sl.innerHTML = sorted.length ? groups.map((g) => `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(g.sum)}</div></div>` + g.items.map((s) => {
     const sup = Math.max(0, (s.total || 0) - (s.salary || 0));
     return `<div class="row" onclick="openSupport('${s.id}')">
       <div class="k">${s.date.slice(2, 7).replace('-', '.')}<span class="s">${s.date.slice(8)}일</span></div>
       <div class="m">${s.salary ? `입금 <b class="num">${won(s.total)}</b> − 월급 ${won(s.salary)}` : `지원 입금`}<span class="memo">${esc(s.memo || '')}</span></div>
       <div class="v num">+${won(sup)}<small>지원분</small></div></div>`;
-  }).join('') : '<div class="empty">아직 입금 기록이 없어요. “+ 입금 추가”로 시작하세요.</div>';
+  }).join('')).join('') : '<div class="empty">아직 입금 기록이 없어요. “+ 입금 추가”로 시작하세요.</div>';
 
   // 쓴 돈
   const ml = document.getElementById('moveList');
