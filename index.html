@@ -148,7 +148,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v9</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v10</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -188,6 +188,11 @@
 
   <section class="panel" id="panel-support">
     <div class="sec"><span>지원금 입금 기록</span><span style="display:flex;gap:6px"><button class="btn" type="button" onclick="openSalaryTool()">월급 일괄 적용</button><button class="btn primary" type="button" onclick="openSupport()">+ 입금 추가</button></span></div>
+    <div class="list" style="padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label for="assumeSalary" style="font-size:12.5px;color:var(--ink-2);font-weight:600">월급 가정 (미리보기)</label>
+      <input id="assumeSalary" type="text" inputmode="numeric" placeholder="예: 773,600" style="flex:1;min-width:120px;padding:8px 10px;border:1px solid var(--line-2);border-radius:8px;background:var(--bg);font-size:14px" oninput="setAssume(this.value)" onblur="fmtInput(this)">
+      <span class="note" style="margin:0;flex-basis:100%">월급이 비어 있는 입금에 “가정 시 지원분”을 옆에 보여줘요. 저장되진 않아요 — 확정되면 “월급 일괄 적용”.</span>
+    </div>
     <div class="list" id="supportList"></div>
     <p class="note">월급과 섞여 들어온 날은 <b>입금 총액</b>과 <b>그중 월급</b>을 적으면 나머지가 등록금 지원분으로 잡혀요. 월급을 아직 모르면 총액만 넣어두고, 나중에 <b>월급 일괄 적용</b>으로 한 번에 채우세요.</p>
   </section>
@@ -253,6 +258,9 @@ const supportInTerm = (t) => S.support.filter((x) => { const k = termOfDate(x.da
 const termTitle = (year, sem) => { const i = S.terms.findIndex((t) => t.year === year && t.sem === sem); return `${year}년 ${sem}학기${i >= 0 ? ` (${progLabel(i)})` : ''} · ${semRange(sem)}`; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtD = (d) => d ? d.slice(2).replace(/-/g, '.') : '—';   // 2026-09-25 → 26.09.25
+let assumeSalary = (() => { try { return Number(localStorage.getItem('tuition1_assume')) || 0; } catch { return 0; } })();   // 미리보기용, 장부 데이터와 별개
+function setAssume(v) { assumeSalary = parseWon(v); try { localStorage.setItem('tuition1_assume', String(assumeSalary)); } catch {} render(); }
+const supWith = (x) => Math.max(0, (x.total || 0) - (x.salary || (assumeSalary ? Math.min(assumeSalary, x.total || 0) : 0)));   // 가정 적용 지원분 (입금 ≤ 월급이면 0)
 // 날짜는 항상 한국 시간(Asia/Seoul) 기준 — 기기 시간대가 달라도 학기 판정이 흔들리지 않게
 const kstParts = () => { const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).reduce((a, x) => ((a[x.type] = x.value), a), {}); return { y: Number(p.year), m: Number(p.month), d: Number(p.day), iso: `${p.year}-${p.month}-${p.day}` }; };
 const today = () => kstParts().iso;
@@ -347,13 +355,14 @@ function render() {
   const sl = document.getElementById('supportList');
   const sorted = S.support.slice().sort((a, b) => b.date.localeCompare(a.date));
   const groups = [];   // 학기별 묶음 (최신 학기부터)
-  for (const s of sorted) { const k = termOfDate(s.date); const key = `${k.year}-${k.sem}`; let g = groups.find((x) => x.key === key); if (!g) { g = { key, ...k, items: [], sum: 0 }; groups.push(g); } g.items.push(s); g.sum += Math.max(0, (s.total || 0) - (s.salary || 0)); }
-  sl.innerHTML = sorted.length ? groups.map((g) => `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(g.sum)}</div></div>` + g.items.map((s) => {
-    const sup = Math.max(0, (s.total || 0) - (s.salary || 0));
+  for (const s of sorted) { const k = termOfDate(s.date); const key = `${k.year}-${k.sem}`; let g = groups.find((x) => x.key === key); if (!g) { g = { key, ...k, items: [], sum: 0, sumA: 0 }; groups.push(g); } g.items.push(s); g.sum += Math.max(0, (s.total || 0) - (s.salary || 0)); g.sumA += supWith(s); }
+  const ai = document.getElementById('assumeSalary'); if (ai && document.activeElement !== ai) ai.value = assumeSalary ? assumeSalary.toLocaleString('ko-KR') : '';
+  sl.innerHTML = sorted.length ? groups.map((g) => `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(g.sum)}${assumeSalary && g.sumA !== g.sum ? `<small style="color:var(--warn)">가정 시 ${won(g.sumA)}</small>` : ''}</div></div>` + g.items.map((s) => {
+    const sup = Math.max(0, (s.total || 0) - (s.salary || 0)), supA = supWith(s);
     return `<div class="row" onclick="openSupport('${s.id}')">
       <div class="k">${s.date.slice(2, 7).replace('-', '.')}<span class="s">${s.date.slice(8)}일</span></div>
-      <div class="m">${s.salary ? `입금 <b class="num">${won(s.total)}</b> − 월급 ${won(s.salary)}` : `지원 입금`}<span class="memo">${esc(s.memo || '')}</span></div>
-      <div class="v num">+${won(sup)}<small>지원분</small></div></div>`;
+      <div class="m">${s.salary ? `입금 <b class="num">${won(s.total)}</b> − 월급 ${won(s.salary)}` : `입금 <b class="num">${won(s.total)}</b> (월급 미입력)`}<span class="memo">${esc(s.memo || '')}</span></div>
+      <div class="v num">+${won(sup)}<small>지원분</small>${assumeSalary && !s.salary && supA !== sup ? `<small style="color:var(--warn)">가정 시 +${won(supA)}</small>` : ''}</div></div>`;
   }).join('')).join('') : '<div class="empty">아직 입금 기록이 없어요. “+ 입금 추가”로 시작하세요.</div>';
 
   // 쓴 돈
