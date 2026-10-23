@@ -148,7 +148,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v11</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v12</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -191,7 +191,8 @@
     <div class="list" style="padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <label for="assumeSalary" style="font-size:12.5px;color:var(--ink-2);font-weight:600">월급 가정 (미리보기)</label>
       <input id="assumeSalary" type="text" inputmode="numeric" placeholder="예: 773,600" style="flex:1;min-width:120px;padding:8px 10px;border:1px solid var(--line-2);border-radius:8px;background:var(--bg);font-size:14px" oninput="setAssume(this.value)" onblur="fmtInput(this)">
-      <span class="note" style="margin:0;flex-basis:100%">월급이 비어 있는 입금에 “가정 시 지원분”을 옆에 보여줘요. 저장되진 않아요 — 확정되면 “월급 일괄 적용”.</span>
+      <span class="note" style="margin:0;flex-basis:100%">“월급이 이 금액이라고 치면 지원금이 얼마인가”를 미리 계산해 보여줘요. 저장되진 않아요 — 확정되면 “월급 일괄 적용”.</span>
+      <div id="assumeSummary" class="note" style="margin:0;flex-basis:100%;color:var(--warn);font-weight:600"></div>
     </div>
     <div class="list" id="supportList"></div>
     <p class="note">입금은 들어온 대로 전부 적고(한 달에 여러 번도 OK), 월급은 <b>달 줄을 눌러 달마다 한 번</b> 넣어요. 그 달 입금 합계 − 월급 = 그 달 지원분. 월급을 아직 모르면 비워두고, 위 “월급 가정”으로 미리 보거나 나중에 <b>월급 일괄 적용</b>으로 한 번에 채우세요.</p>
@@ -368,15 +369,24 @@ function render() {
   const groups = [];   // 학기 묶음 (최신부터) → 그 안에 달
   for (const k of months) { const c = termOfDate(k + '-01'); const key = `${c.year}-${c.sem}`; let g = groups.find((x) => x.key === key); if (!g) { g = { key, ...c, months: [] }; groups.push(g); } g.months.push(k); }
   const sumTerm = (g, assume) => g.months.reduce((a, k) => a + monthSupport(k, assume), 0);
+  const asum = document.getElementById('assumeSummary');
+  if (asum) {
+    if (assumeSalary && S.support.length) {
+      const cur = currentCal(); const curIdx = S.terms.findIndex(isCurrent);
+      const curSup = allMonths().filter((k) => { const c = termOfDate(k + '-01'); return c.year === cur.year && c.sem === cur.sem; }).reduce((a, k) => a + monthSupport(k, assumeSalary), 0);
+      const allSup = allMonths().reduce((a, k) => a + monthSupport(k, assumeSalary), 0);
+      asum.textContent = `월급 ${won(assumeSalary)} 가정 시 → 이번 학기${curIdx >= 0 ? `(${progLabel(curIdx)})` : ''} 등록금 지원 ${won(curSup)} · 전체 받은 지원 ${won(allSup)}`;
+    } else asum.textContent = '';
+  }
   sl.innerHTML = sorted.length ? groups.map((g) => {
     const sum = sumTerm(g, 0), sumA = sumTerm(g, assumeSalary);
-    return `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(sum)}${assumeSalary && sumA !== sum ? `<small style="color:var(--warn)">가정 시 ${won(sumA)}</small>` : ''}</div></div>`
+    return `<div class="row" style="cursor:default;background:var(--bg);grid-template-columns:1fr auto;padding:8px 14px"><div class="k" style="font-size:12.5px">${termTitle(g.year, g.sem)}</div><div class="v num" style="font-size:13px">지원 합계 ${won(sum)}${assumeSalary && sumA !== sum ? `<small style="color:var(--warn)">월급 ${manwon(assumeSalary)}원 가정 시 이 학기 지원 ${won(sumA)}</small>` : ''}</div></div>`
     + g.months.map((k) => {
       const tot = monthTotal(k), sal = monthSalaryOf(k), sup = monthSupport(k), supA = monthSupport(k, assumeSalary), items = monthDeposits(k).sort((x, y) => y.date.localeCompare(x.date));
-      const salText = sal ? `− 월급 ${won(sal)}` : (assumeSalary ? `<span style="color:var(--warn)">− 월급 가정 ${won(Math.min(assumeSalary, tot))}</span>` : '<span style="color:var(--ink-3)">월급 미정</span>');
+      const salText = sal ? `− 월급 ${won(sal)}` : (assumeSalary ? `<span style="color:var(--warn)">− 월급 ${won(Math.min(assumeSalary, tot))}(가정)</span>` : '<span style="color:var(--ink-3)">월급 미정</span>');
       return `<div class="row" style="grid-template-columns:1fr auto;padding:9px 14px;border-top:1px solid var(--line)" onclick="openMonthSalary('${k}')">
           <div class="m"><b>${k.replace('-', '년 ')}월</b> · 입금 ${items.length}건 <b class="num">${won(tot)}</b> ${salText}<span class="memo">누르면 이 달 월급 입력</span></div>
-          <div class="v num">${sal ? '+' + won(sup) : (assumeSalary ? `<span style="color:var(--warn)">+${won(supA)}</span>` : '+' + won(sup))}<small>이 달 지원분</small></div></div>`
+          <div class="v num">${sal ? '+' + won(sup) : (assumeSalary ? `<span style="color:var(--warn)">+${won(supA)}</span>` : '+' + won(sup))}<small>${sal ? '이 달 등록금 지원' : (assumeSalary ? '가정 시 이 달 등록금 지원' : '이 달 입금 전액 (월급 미정)')}</small></div></div>`
         + items.map((s) => `<div class="row" onclick="openSupport('${s.id}')" style="padding-left:28px">
           <div class="k">${s.date.slice(2, 7).replace('-', '.')}<span class="s">${s.date.slice(8)}일</span></div>
           <div class="m">입금 <b class="num">${won(s.total)}</b><span class="memo">${esc(s.memo || '')}</span></div>
