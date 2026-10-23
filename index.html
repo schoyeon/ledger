@@ -148,7 +148,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v7</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v8</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -187,9 +187,9 @@
   </section>
 
   <section class="panel" id="panel-support">
-    <div class="sec"><span>지원금 입금 기록</span><button class="btn primary" type="button" onclick="openSupport()">+ 입금 추가</button></div>
+    <div class="sec"><span>지원금 입금 기록</span><span style="display:flex;gap:6px"><button class="btn" type="button" onclick="openSalaryTool()">월급 일괄 적용</button><button class="btn primary" type="button" onclick="openSupport()">+ 입금 추가</button></span></div>
     <div class="list" id="supportList"></div>
-    <p class="note">월급과 섞여 들어온 날은 <b>입금 총액</b>과 <b>그중 월급</b>을 적으면 나머지가 등록금 지원분으로 잡혀요. 지원분만 따로 들어왔으면 총액만 적으면 됩니다.</p>
+    <p class="note">월급과 섞여 들어온 날은 <b>입금 총액</b>과 <b>그중 월급</b>을 적으면 나머지가 등록금 지원분으로 잡혀요. 월급을 아직 모르면 총액만 넣어두고, 나중에 <b>월급 일괄 적용</b>으로 한 번에 채우세요.</p>
   </section>
 
   <section class="panel" id="panel-moves">
@@ -249,6 +249,7 @@ const semRange = (sem) => sem === 1 ? '3월~8월' : '9월~2월';
 const currentCal = () => { const { y, m } = kstParts(); return m >= 3 && m <= 8 ? { year: y, sem: 1 } : { year: m >= 9 ? y : y - 1, sem: 2 }; };
 const isCurrent = (t) => { const c = currentCal(); return t.year === c.year && t.sem === c.sem; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtD = (d) => d ? d.slice(2).replace(/-/g, '.') : '—';   // 2026-09-25 → 26.09.25
 // 날짜는 항상 한국 시간(Asia/Seoul) 기준 — 기기 시간대가 달라도 학기 판정이 흔들리지 않게
 const kstParts = () => { const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).reduce((a, x) => ((a[x.type] = x.value), a), {}); return { y: Number(p.year), m: Number(p.month), d: Number(p.day), iso: `${p.year}-${p.month}-${p.day}` }; };
 const today = () => kstParts().iso;
@@ -536,6 +537,43 @@ function saveMove(id) {
   save(); render(); closeSheet(); toast(id ? '수정됐어요' : '기록했어요');
 }
 function delMove(id) { if (!confirm('이 기록을 삭제할까요?')) return; S.moves = S.moves.filter((x) => x.id !== id); S.deleted[id] = new Date().toISOString(); save(); render(); closeSheet(); toast('삭제했어요'); }
+
+// ───────────── 월급 일괄 적용 + 역산 도우미 ─────────────
+function openSalaryTool() {
+  if (!S.support.length) return toast('먼저 입금 기록을 넣어주세요');
+  const rows = S.support.slice().sort((a, b) => b.date.localeCompare(a.date));
+  sheet(`<h2>월급 일괄 적용</h2>
+    <p class="note" style="margin:0 0 10px">세후 월급을 넣고 적용하면 체크한 입금 기록의 "그중 월급"이 한 번에 채워져요. 지원분 = 총액 − 월급으로 다시 계산됩니다.</p>
+    <div class="field"><label>세후 월급 (원)</label><input id="bsSalary" type="text" inputmode="numeric" placeholder="예: 773,600" onblur="fmtInput(this)"></div>
+    <div class="field" style="background:var(--bg);border-radius:10px;padding:10px 12px">
+      <label>모르면 역산: 등록금이 섞인 입금을 고르고, 그때 포함된 등록금을 적으면</label>
+      <div class="grid2" style="margin-top:6px">
+        <select id="bsPick">${rows.map((r) => `<option value="${r.id}">${fmtD(r.date)} · ${won(r.total)}</option>`).join('')}</select>
+        <input id="bsTuition" type="text" inputmode="numeric" placeholder="섞인 등록금 (원)" value="${S.settings.tuition ? S.settings.tuition.toLocaleString('ko-KR') : ''}" onblur="fmtInput(this)">
+      </div>
+      <div class="chips" style="margin-top:8px"><button type="button" onclick="bsReverse()">월급 = 입금 − 등록금 으로 채우기</button></div>
+      <div class="calc" id="bsHint" style="margin-top:6px"></div>
+    </div>
+    <div class="field"><label>적용할 입금 (기본: 월급이 비어 있는 것)</label>
+      <div class="list" style="max-height:220px;overflow:auto">${rows.map((r) => `<label class="spend" style="padding:8px 12px;cursor:pointer"><span><input type="checkbox" class="bsChk" value="${r.id}" ${r.salary ? '' : 'checked'}> ${fmtD(r.date)} · 총액 ${won(r.total)}</span><span class="num" style="color:var(--ink-3)">${r.salary ? '월급 ' + won(r.salary) : '월급 없음'}</span></label>`).join('')}</div></div>
+    <div class="sheet-btns"><button class="btn" type="button" onclick="closeSheet()">취소</button><button class="btn primary" type="button" onclick="applySalary()">적용</button></div>`);
+}
+function bsReverse() {
+  const r = S.support.find((x) => x.id === document.getElementById('bsPick').value); if (!r) return;
+  const tu = parseWon(document.getElementById('bsTuition').value);
+  const sal = r.total - tu;
+  if (!tu || sal <= 0) { document.getElementById('bsHint').textContent = '등록금 금액을 확인하세요 (입금보다 작아야 해요)'; return; }
+  document.getElementById('bsSalary').value = sal.toLocaleString('ko-KR');
+  document.getElementById('bsHint').textContent = `${won(r.total)} − ${won(tu)} = 월급 ${won(sal)}` + (sal === 773600 ? ' (80만원 사업소득 3.3% 공제와 일치)' : sal === 729600 ? ' (80만원 기타소득 8.8% 공제와 일치)' : '');
+}
+function applySalary() {
+  const sal = parseWon(document.getElementById('bsSalary').value); if (!sal) return toast('월급을 입력하세요');
+  const ids = new Set([...document.querySelectorAll('.bsChk:checked')].map((c) => c.value)); if (!ids.size) return toast('적용할 입금을 체크하세요');
+  let n = 0;
+  // 입금이 월급보다 작거나 같으면 그 달은 월급만 들어온 것 → 월급 = 총액(지원분 0)
+  S.support = S.support.map((r) => { if (!ids.has(r.id)) return r; n += 1; return { ...r, salary: Math.min(sal, r.total), at: new Date().toISOString() }; });
+  save(); render(); closeSheet(); toast(`${n}건에 월급 ${won(sal)} 적용 (입금이 월급 이하인 달은 지원분 0)`);
+}
 
 // ───────────── 백업/복원 ─────────────
 function exportJSON() {
