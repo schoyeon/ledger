@@ -148,7 +148,7 @@
   <header>
     <div>
       <h1>등록금 장부</h1>
-      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v13</span></div>
+      <div class="sub"><span id="subLine">석박통합 · 1-1 → 5-2 · 10학기</span> <span style="color:var(--ink-3);font-size:11px">· v14</span></div>
     </div>
     <div class="tools">
       <button type="button" id="syncBtn" onclick="onSyncBtn()">로그인</button>
@@ -169,6 +169,12 @@
   </nav>
 
   <section class="panel active" id="panel-summary">
+    <div class="list" style="padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label for="assumeSalary" style="font-size:12.5px;color:var(--ink-2);font-weight:600">월급 가정 (미리보기)</label>
+      <input id="assumeSalary" type="text" inputmode="numeric" placeholder="예: 773,600" style="flex:1;min-width:120px;padding:8px 10px;border:1px solid var(--line-2);border-radius:8px;background:var(--bg);font-size:14px" oninput="setAssume(this.value)" onblur="fmtInput(this)">
+      <span class="note" style="margin:0;flex-basis:100%">월급을 아직 모를 때 — “월급이 이 금액이라고 치면, 월급 뺀 등록금 지원이 얼마인가”를 아래 숫자들에 같이 보여줘요. 저장되진 않아요. 확정되면 지원금 탭의 “월급 일괄 적용”.</span>
+      <div id="assumeSummary" class="note" style="margin:0;flex-basis:100%;color:var(--warn);font-weight:600"></div>
+    </div>
     <div class="chart">
       <h3>등록금 돈 흐름</h3>
       <div class="cap"><span style="display:inline-block;width:10px;height:3px;background:var(--accent);vertical-align:middle;margin-right:4px"></span>있어야 할 돈(지원 − 납부) &nbsp; <span style="display:inline-block;width:10px;height:3px;background:var(--warn);vertical-align:middle;margin-right:4px"></span>실제 보관 중(꺼내 쓴 만큼 아래로)</div>
@@ -188,12 +194,6 @@
 
   <section class="panel" id="panel-support">
     <div class="sec"><span>지원금 입금 기록</span><span style="display:flex;gap:6px"><button class="btn" type="button" onclick="openSalaryTool()">월급 일괄 적용</button><button class="btn primary" type="button" onclick="openSupport()">+ 입금 추가</button></span></div>
-    <div class="list" style="padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <label for="assumeSalary" style="font-size:12.5px;color:var(--ink-2);font-weight:600">월급 가정 (미리보기)</label>
-      <input id="assumeSalary" type="text" inputmode="numeric" placeholder="예: 773,600" style="flex:1;min-width:120px;padding:8px 10px;border:1px solid var(--line-2);border-radius:8px;background:var(--bg);font-size:14px" oninput="setAssume(this.value)" onblur="fmtInput(this)">
-      <span class="note" style="margin:0;flex-basis:100%">“월급이 이 금액이라고 치면 지원금이 얼마인가”를 미리 계산해 보여줘요. 저장되진 않아요 — 확정되면 “월급 일괄 적용”.</span>
-      <div id="assumeSummary" class="note" style="margin:0;flex-basis:100%;color:var(--warn);font-weight:600"></div>
-    </div>
     <div class="list" id="supportList"></div>
     <p class="note">입금은 들어온 대로 전부 적고(한 달에 여러 번도 OK), 월급은 <b>달 줄을 눌러 달마다 한 번</b> 넣어요. 그 달 입금 합계 − 월급 = 그 달 지원분. 월급을 아직 모르면 비워두고, 위 “월급 가정”으로 미리 보거나 나중에 <b>월급 일괄 적용</b>으로 한 번에 채우세요.</p>
   </section>
@@ -318,19 +318,24 @@ function render() {
   const curIdx = S.terms.findIndex(isCurrent);
   document.getElementById('subLine').textContent = `${S.settings.name || '석박통합'} · ${curIdx >= 0 ? `현재 ${progLabel(curIdx)} · ` : ''}${S.terms.length ? progLabel(S.terms.length - 1) + '까지 ' : ''}${S.settings.count}학기 · 학기당 ${S.settings.tuition ? manwon(S.settings.tuition) + '원' : '등록금 미설정'}`;
 
+  // 월급 가정 시 값 (월급 미정인 달에 가정 월급을 적용) — 가정이 없거나 실제와 같으면 표시 안 함
+  const supA = assumeSalary ? allMonths().reduce((a, k) => a + monthSupport(k, assumeSalary), 0) : c.supportTotal;
+  const showA = assumeSalary && supA !== c.supportTotal;
+  const balA = supA - c.paid, actA = balA - c.netUsed;
+  const aHint = (v) => showA ? `<div class="hint" style="color:var(--warn);font-weight:600">월급 ${won(assumeSalary)} 가정 시 ${v > 0 ? '+' : ''}${won(v)}</div>` : '';
   const actCls = c.actual > 0 ? 'plus' : c.actual < 0 ? 'minus' : '';
   const actHint = c.netUsed > 0
     ? `있어야 할 돈 ${won(c.balance)} 중 <b>${won(c.netUsed)}</b>을 꺼내 썼어요 → 다음 납부 전에 채워 넣을 돈`
     : c.balance > 0 ? '미리 받아둔 등록금이 그대로 있어요' : c.balance < 0 ? '내 돈으로 낸 부분 — 아직 지원받지 못한 금액' : '받은 지원과 낸 등록금이 딱 맞아요';
   document.getElementById('tiles').innerHTML = `
     <div class="tile hero ${actCls}">
-      <div><div class="label">실제 보관 중인 등록금 돈</div><div class="val num">${c.actual > 0 ? '+' : ''}${won(c.actual)}</div><div class="hint">${actHint}</div></div>
+      <div><div class="label">실제 보관 중인 등록금 돈</div><div class="val num">${c.actual > 0 ? '+' : ''}${won(c.actual)}</div><div class="hint">${actHint}</div>${aHint(actA)}</div>
       <span class="badge ${c.netUsed > 0 ? 'warn' : (actCls || 'muted')}">${c.netUsed > 0 ? '채워야 함' : c.actual > 0 ? '보관 중' : c.actual < 0 ? '미지원' : '정산'}</span>
     </div>
     <div class="tile ${c.netUsed > 0 ? 'minus' : ''}"><div class="label">채워 넣어야 할 돈</div><div class="val num">${won(Math.max(0, c.netUsed))}</div><div class="hint">꺼내 씀 ${won(c.used)} − 채움 ${won(c.refilled)}</div></div>
-    <div class="tile"><div class="label">있어야 할 돈 (지원 − 납부)</div><div class="val num">${c.balance > 0 ? '+' : ''}${won(c.balance)}</div><div class="hint">${c.balance > 0 ? '미리 받아둔 등록금' : c.balance < 0 ? '아직 지원 못 받은 부분' : '정산됨'}</div></div>
+    <div class="tile"><div class="label">있어야 할 돈 (지원 − 납부)</div><div class="val num">${c.balance > 0 ? '+' : ''}${won(c.balance)}</div><div class="hint">${c.balance > 0 ? '미리 받아둔 등록금' : c.balance < 0 ? '아직 지원 못 받은 부분' : '정산됨'}</div>${aHint(balA)}</div>
     <div class="tile"><div class="label">지금까지 낸 등록금</div><div class="val num">${won(c.paid)}</div><div class="hint">${c.paidTerms}학기 납부</div></div>
-    <div class="tile"><div class="label">받은 등록금 지원 누계</div><div class="val num">${won(c.supportTotal)}</div><div class="hint">${S.support.length}건 입금</div></div>
+    <div class="tile"><div class="label">받은 등록금 지원 누계 (월급 제외)</div><div class="val num">${won(c.supportTotal)}</div><div class="hint">${S.support.length}건 입금${allMonths().some((k) => !monthSalaryOf(k)) ? ' · 월급 미정인 달은 전액 포함' : ''}</div>${aHint(supA)}</div>
     <div class="tile"><div class="label">남은 등록금</div><div class="val num">${won(c.remaining)}</div><div class="hint">${c.remainingTerms}학기 남음</div></div>
     <div class="tile"><div class="label">총 등록금 (전체 과정)</div><div class="val num">${won(c.totalTuition)}</div>
       <div class="progress"><div class="bar"><i class="paid" style="width:${c.totalTuition ? Math.min(100, c.paid / c.totalTuition * 100) : 0}%"></i></div>
@@ -375,7 +380,8 @@ function render() {
       const cur = currentCal(); const curIdx = S.terms.findIndex(isCurrent);
       const curSup = allMonths().filter((k) => { const c = termOfDate(k + '-01'); return c.year === cur.year && c.sem === cur.sem; }).reduce((a, k) => a + monthSupport(k, assumeSalary), 0);
       const allSup = allMonths().reduce((a, k) => a + monthSupport(k, assumeSalary), 0);
-      asum.textContent = `월급 ${won(assumeSalary)} 가정 시 → 이번 학기${curIdx >= 0 ? `(${progLabel(curIdx)})` : ''} 등록금 지원 ${won(curSup)} · 전체 받은 지원 ${won(allSup)}`;
+      const c2 = calc();
+      asum.textContent = `월급 ${won(assumeSalary)} 가정 시 → 월급 뺀 등록금 지원: 이번 학기${curIdx >= 0 ? `(${progLabel(curIdx)})` : ''} ${won(curSup)} · 전체 ${won(allSup)} → 있어야 할 돈 ${won(allSup - c2.paid)} · 실제 보관 ${won(allSup - c2.paid - c2.netUsed)}`;
     } else asum.textContent = '';
   }
   sl.innerHTML = sorted.length ? groups.map((g) => {
